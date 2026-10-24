@@ -2304,17 +2304,13 @@ body {
 }
 .about-discovery-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   border: 1px solid var(--line);
 }
 .about-feature {
-  min-height: 350px;
+  min-height: 290px;
   padding: clamp(1.7rem, 3vw, 2.7rem);
-  border-right: 1px solid var(--line);
   background: color-mix(in srgb, var(--surface) 76%, transparent);
-}
-.about-feature:last-child {
-  border-right: 0;
 }
 .about-feature > svg,
 .about-faq-heading > svg {
@@ -2328,14 +2324,6 @@ body {
 .about-feature > p:not(.eyebrow) {
   color: var(--muted);
   line-height: 1.75;
-}
-.about-coming-soon {
-  display: inline-flex;
-  margin-top: 0.8rem;
-  color: var(--gold);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 .about-faq {
   display: grid;
@@ -14502,6 +14490,29 @@ body {
   .public-header .nav,
   .public-header.home-header .nav {
     top: calc(100% + 0.45rem);
+  }
+  .public-header .nav[role="dialog"].open,
+  .public-header.home-header .nav[role="dialog"].open {
+    right: 0;
+    left: 0;
+    max-height: calc(100dvh - 84px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 1.15rem;
+    color: var(--ink);
+    background: color-mix(in srgb, var(--paper) 98%, transparent);
+    border: 1px solid color-mix(in srgb, var(--line) 82%, transparent);
+    border-radius: 0.35rem;
+    box-shadow: 0 20px 48px rgba(28, 15, 10, 0.24);
+    -webkit-overflow-scrolling: touch;
+  }
+  .public-header .nav[role="dialog"] a,
+  .public-header.home-header .nav[role="dialog"] a {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    color: var(--ink);
+    text-shadow: none;
   }
   .interior-shell > main {
     padding-top: 76px;

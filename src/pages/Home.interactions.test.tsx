@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { BookOpen, ShieldCheck, Sparkles } from 'lucide-react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { missionTitleLines, ParallaxFigure } from './Home'
+import { InformationGrid, missionTitleLines, ParallaxFigure } from './Home'
 
 describe('homepage card interaction', () => {
   beforeEach(() => {
@@ -32,5 +33,30 @@ describe('homepage mission title', () => {
       "The Church's Light,",
       'Is Meant To Be Shared',
     ])
+  })
+})
+
+describe('homepage information carousel', () => {
+  it('supports arrow-key navigation and wraps in reduced-motion mode', () => {
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }) as unknown as typeof window.matchMedia
+    render(<InformationGrid items={[
+      { icon: BookOpen, title: 'One', body: 'First' },
+      { icon: Sparkles, title: 'Two', body: 'Second' },
+      { icon: ShieldCheck, title: 'Three', body: 'Third' },
+    ]} />)
+
+    const carousel = screen.getByRole('region', { name: 'Why Doxa information' })
+    const retainedCard = screen.getByRole('heading', { name: 'Two' }).closest('article')
+    fireEvent.keyDown(carousel, { key: 'ArrowRight' })
+    expect(screen.getByRole('status')).toHaveTextContent('Information 2 of 3')
+    expect(screen.getByRole('heading', { name: 'Two' }).closest('article')).toBe(retainedCard)
+    fireEvent.keyDown(carousel, { key: 'ArrowLeft' })
+    expect(screen.getByRole('status')).toHaveTextContent('Information 1 of 3')
+    fireEvent.keyDown(carousel, { key: 'ArrowLeft' })
+    expect(screen.getByRole('status')).toHaveTextContent('Information 3 of 3')
   })
 })

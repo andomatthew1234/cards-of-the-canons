@@ -11,6 +11,7 @@
     "build": "tsc -b && vite build && node scripts/generate-seo.mjs && node scripts/check-dist.mjs",
     "seo:check": "node scripts/check-seo.mjs",
     "artifact:check": "node scripts/check-dist.mjs",
+    "performance:check": "node scripts/check-performance-budget.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --maxWorkers=1",

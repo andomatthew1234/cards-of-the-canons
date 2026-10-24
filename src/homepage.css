@@ -178,21 +178,46 @@
 }
 
 .home-product-showcase {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(0.55rem, 1vw, 0.9rem);
   width: 100%;
+  overflow: hidden;
 }
 
-.home-product-showcase.is-next,
-.home-information-grid.is-next {
-  animation: home-carousel-next 560ms cubic-bezier(.22, 1, .36, 1) both;
+.home-product-track,
+.home-information-track {
+  --home-carousel-gap: clamp(0.55rem, 1vw, 0.9rem);
+  --home-carousel-shift: calc((-100% - var(--home-carousel-gap)) * .333333);
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: calc((100% - (2 * var(--home-carousel-gap))) / 3);
+  gap: var(--home-carousel-gap);
+  width: 100%;
+  transform: translate3d(0, 0, 0);
+  transition: none;
 }
 
-.home-product-showcase.is-previous,
-.home-information-grid.is-previous {
-  animation: home-carousel-previous 560ms cubic-bezier(.22, 1, .36, 1) both;
+.home-product-track[data-visible-count="1"],
+.home-information-track[data-visible-count="1"] {
+  --home-carousel-shift: calc(-100% - var(--home-carousel-gap));
+  grid-auto-columns: 100%;
 }
+.home-product-track[data-visible-count="2"],
+.home-information-track[data-visible-count="2"] {
+  --home-carousel-shift: calc((-100% - var(--home-carousel-gap)) * .5);
+  grid-auto-columns: calc((100% - var(--home-carousel-gap)) / 2);
+}
+.home-product-track.is-previous,
+.home-information-track.is-previous { transform: translate3d(var(--home-carousel-shift), 0, 0); }
+.home-product-track.is-next.is-active,
+.home-information-track.is-next.is-active { transform: translate3d(var(--home-carousel-shift), 0, 0); }
+.home-product-track.is-previous.is-active,
+.home-information-track.is-previous.is-active { transform: translate3d(0, 0, 0); }
+.home-product-track.is-active,
+.home-information-track.is-active {
+  will-change: transform;
+  transition: transform 480ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.home-product-slide { min-width: 0; }
 
 .home-product-showcase .product-card-compact {
   position: relative;
@@ -274,6 +299,8 @@
 }
 .home-product-arrow svg,
 .home-information-arrow svg { width: 20px; }
+.home-product-arrow:disabled,
+.home-information-arrow:disabled { cursor: wait; }
 .home-product-arrow.previous { left: -23px; }
 .home-product-arrow.next { right: -23px; }
 .home-product-page { display: block; margin-top: .7rem; color: #795d4e; font-size: .62rem; letter-spacing: .08em; text-align: center; }
@@ -293,10 +320,12 @@
 }
 
 .home-information-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   width: 100%;
-  filter: none;
+  overflow: hidden;
+}
+
+.home-information-track {
+  --home-carousel-gap: 0px;
 }
 
 .home-information-card {
@@ -307,6 +336,7 @@
   clip-path: polygon(10% 0, 100% 0, 90% 100%, 0 100%);
 }
 .home-information-card + .home-information-card { margin-left: -3%; }
+.home-information-track .home-information-card + .home-information-card { margin-left: 0; }
 .home-information-card h3 { color: #2b0000; }
 .home-information-card p { color: #5f4035; }
 .home-information-card .home-information-icon { color: #9b561f; }
@@ -329,16 +359,6 @@
 .home-information-arrow { color: #2b0000; background: #fff; }
 .home-information-arrow.previous { left: clamp(.75rem, 2vw, 2rem); }
 .home-information-arrow.next { right: clamp(.75rem, 2vw, 2rem); }
-
-@keyframes home-carousel-next {
-  from { opacity: .18; transform: translateX(58px); filter: blur(3px); }
-  to { opacity: 1; transform: translateX(0); filter: blur(0); }
-}
-
-@keyframes home-carousel-previous {
-  from { opacity: .18; transform: translateX(-58px); filter: blur(3px); }
-  to { opacity: 1; transform: translateX(0); filter: blur(0); }
-}
 
 .home-shell .home-mission-centre {
   padding: clamp(4rem, 6.5vw, 6.5rem) clamp(1.5rem, 3.4vw, 3.4rem);
@@ -379,9 +399,7 @@
 }
 
 @media (max-width: 979px) {
-  .home-product-showcase { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .home-information-carousel { padding-inline: 3.2rem; }
-  .home-information-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .home-information-card { min-height: 340px; }
 }
 
@@ -400,15 +418,13 @@
 
 @media (max-width: 639px) {
   .home-shell .home-collection.home-stage { padding: 4.5rem .85rem; }
-  .home-product-showcase { grid-template-columns: minmax(0, 1fr); padding: 0; overflow: visible; }
+  .home-product-showcase { padding: 0; }
   .home-product-showcase .product-card-compact { aspect-ratio: 1 / 1; }
   .home-product-arrow { width: 46px; height: 46px; }
   .home-product-arrow.previous { left: -.2rem; }
   .home-product-arrow.next { right: -.2rem; }
   .home-information.home-stage { min-height: 72svh; padding: 4.5rem 0; }
   .home-information-carousel { padding-inline: 2.5rem; }
-  .home-information-grid { grid-template-columns: minmax(0, 1fr); }
-  .home-information-grid .home-information-card:not(:first-child) { display: none; }
   .home-information-card { min-height: 330px; padding: 2.5rem 2rem; clip-path: polygon(7% 0, 100% 0, 93% 100%, 0 100%); }
   .home-information-card + .home-information-card { margin-left: 0; }
   .home-information-ghost { width: 180px; filter: blur(7px); opacity: .24; }
@@ -417,14 +433,23 @@
   .home-information-arrow { width: 46px; height: 46px; }
   .home-information-arrow.previous { left: .3rem; }
   .home-information-arrow.next { right: .3rem; }
-  .home-shell .home-mission-heading h2 { font-size: clamp(2rem, 9vw, 3.15rem); }
+  .home-shell .home-mission-heading h2 {
+    width: 100%;
+    max-width: 100%;
+    font-size: clamp(1.85rem, 8.5vw, 3.15rem);
+    text-wrap: balance;
+  }
+  .home-shell .home-mission-heading h2 span {
+    white-space: normal;
+    overflow-wrap: normal;
+  }
   .home-shell .home-community-chapter .home-editorial-copy { padding: 3.2rem 1.15rem; }
   .home-shell .home-community-chapter .home-editorial-media img { min-height: 300px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .home-product-showcase,
-  .home-information-grid { animation: none; }
+  .home-product-track,
+  .home-information-track { transition: none; }
   .home-product-showcase .product-card-compact .product-image img { transition: none; }
   .home-history-flip-inner { transition: none; }
 }

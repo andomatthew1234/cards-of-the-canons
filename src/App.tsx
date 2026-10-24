@@ -8,14 +8,16 @@ import { CartProvider } from './context/CartContext'
 import { CatalogProvider } from './context/CatalogContext'
 import { SiteContentProvider } from './context/SiteContentContext'
 import { trackPageView } from './lib/analytics'
-import { About } from './pages/About'
-import { Contact } from './pages/Contact'
 import { Home } from './pages/Home'
-import { Journal, JournalArticle } from './pages/Journal'
-import { NotFound } from './pages/NotFound'
-import { ProductDetail } from './pages/ProductDetail'
-import { Shop } from './pages/Shop'
 
+const About = lazy(() => import('./pages/About').then((module) => ({ default: module.About })))
+const Contact = lazy(() => import('./pages/Contact').then((module) => ({ default: module.Contact })))
+const Journal = lazy(() => import('./pages/Journal').then((module) => ({ default: module.Journal })))
+const JournalArticle = lazy(() => import('./pages/Journal').then((module) => ({ default: module.JournalArticle })))
+const LegalPolicyPage = lazy(() => import('./pages/LegalPolicy').then((module) => ({ default: module.LegalPolicyPage })))
+const NotFound = lazy(() => import('./pages/NotFound').then((module) => ({ default: module.NotFound })))
+const ProductDetail = lazy(() => import('./pages/ProductDetail').then((module) => ({ default: module.ProductDetail })))
+const Shop = lazy(() => import('./pages/Shop').then((module) => ({ default: module.Shop })))
 const Account = lazy(() => import('./pages/Account').then((module) => ({ default: module.Account })))
 const centrePages = () => import('./pages/account/AccountCentrePages')
 const AccountDevicesPage = lazy(() => centrePages().then((module) => ({ default: module.AccountDevicesPage })))
@@ -106,6 +108,10 @@ function AppRoutes() {
     <Route path="/contact" element={<Contact />} />
     <Route path="/journal" element={<Journal />} />
     <Route path="/journal/:slug" element={<JournalArticle />} />
+    <Route path="/policies/privacy" element={<LegalPolicyPage slug="privacy" />} />
+    <Route path="/policies/terms" element={<LegalPolicyPage slug="terms" />} />
+    <Route path="/policies/shipping" element={<LegalPolicyPage slug="shipping" />} />
+    <Route path="/policies/returns" element={<LegalPolicyPage slug="returns" />} />
     <Route path="/account" element={<Account />} />
     <Route path="/account/onboarding" element={<AccountOnboarding />} />
     <Route path="/account/personal-info" element={<PersonalInfoPage />} />

@@ -1,4 +1,4 @@
-import { BookOpen, HelpCircle, MessageSquareQuote, Radio } from 'lucide-react'
+import { BookOpen, HelpCircle } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { PageMeta } from '../components/PageMeta'
 import { Reveal } from '../components/Reveal'
@@ -28,11 +28,9 @@ export function About({ previewMode = false }: { previewMode?: boolean }) {
       <aside className="prose-aside about-explore-enter"><p className="eyebrow">{managed.sections.explore.eyebrow}</p><ul>{managed.sections.explore.items.map((item) => <li key={item}>{item}</li>)}</ul><Link className="button secondary" to="/shop">{managed.sections.explore.actionLabel}</Link></aside>
     </section>
     <section className="about-discovery" aria-labelledby="about-discovery-title">
-      <Reveal className="about-discovery-heading"><p className="eyebrow">Follow the journey</p><h2 id="about-discovery-title">More ways to explore Doxa.</h2><p>News, useful answers and community voices will grow here alongside the collection.</p></Reveal>
+      <Reveal className="about-discovery-heading"><p className="eyebrow">Follow the journey</p><h2 id="about-discovery-title">From the Doxa Journal.</h2><p>Read progress updates, studio notes and longer stories from behind the collection.</p></Reveal>
       <div className="about-discovery-grid">
         <Reveal className="about-feature about-feature-journal" id="journal"><BookOpen aria-hidden="true" /><p className="eyebrow">Journal & progress</p><h3>Behind the collection</h3><p>Follow progress updates, studio notes and longer stories from behind the Doxa Treasury.</p><Link className="text-link" to="/journal">Read the Journal <span aria-hidden="true">→</span></Link></Reveal>
-        <Reveal className="about-feature" delay={70}><Radio aria-hidden="true" /><p className="eyebrow">Social media</p><h3>Follow Doxa</h3><p>Official social channels will be linked here once they are confirmed.</p><span className="about-coming-soon">Links coming soon</span></Reveal>
-        <Reveal className="about-feature" delay={140}><MessageSquareQuote aria-hidden="true" /><p className="eyebrow">Reviews</p><h3>Collector stories</h3><p>Verified customer feedback will appear here as the Doxa community grows.</p><span className="about-coming-soon">Reviews coming soon</span></Reveal>
       </div>
     </section>
     <section className="about-faq" aria-labelledby="about-faq-title">

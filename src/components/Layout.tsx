@@ -5,12 +5,53 @@ import { useAuth } from "../context/AuthContext";
 import { useCart } from "../context/CartContext";
 import { useSiteContent } from "../context/SiteContentContext";
 import { useSiteTheme } from "../context/SiteThemeContext";
+import { getPublishedLegalPolicies, legalPolicyPath } from "../legal/policies";
 import { siteThemeCssVariables } from "../lib/siteTheme";
 import type { SiteTheme } from "../types";
 import { PageTransition } from "./PageTransition";
 
 function isExternalDestination(destination: string) {
   return destination.startsWith("https://");
+}
+
+const SOCIAL_LINK_NAME = /^(?:instagram|instragram|tiktok|you\s*tube|facebook|x|twitter)$/i;
+const PLACEHOLDER_SOCIAL_PATH = /(?:coming[-_ ]?soon|placeholder|replace[-_ ]?me|todo)/i;
+
+export function shouldRenderFooterLink(item: {
+  id: string;
+  label: string;
+  path: string;
+  visible: boolean;
+}) {
+  if (!item.visible) return false;
+  const name = `${item.id} ${item.label}`.trim();
+  if (!SOCIAL_LINK_NAME.test(item.id.trim()) && !SOCIAL_LINK_NAME.test(item.label.trim()) && !SOCIAL_LINK_NAME.test(name)) {
+    return true;
+  }
+
+  const destination = item.path.trim();
+  if (!destination.startsWith("https://") || PLACEHOLDER_SOCIAL_PATH.test(destination)) return false;
+  try {
+    const url = new URL(destination);
+    return Boolean(url.hostname && url.pathname !== "/" && !/(?:^|\.)example\.(?:com|org|net)$/i.test(url.hostname));
+  } catch {
+    return false;
+  }
+}
+
+export function getVisibleFooterGroups<
+  T extends {
+    links: readonly { id: string; label: string; path: string; visible: boolean }[];
+  },
+>(groups: readonly T[], isAdmin: boolean) {
+  return groups
+    .map((group) => ({
+      ...group,
+      links: group.links.filter(
+        (item) => shouldRenderFooterLink(item) && (item.id !== "administrator" || isAdmin),
+      ),
+    }))
+    .filter((group) => group.links.length > 0);
 }
 
 function DestinationLink({
@@ -75,6 +116,10 @@ export function Layout({
   const [scrolled, setScrolled] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const navigationRef = useRef<HTMLElement>(null);
+  const brandRef = useRef<HTMLAnchorElement>(null);
+  const headerActionsRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const footerRef = useRef<HTMLElement>(null);
   const { count } = useCart();
   const { isAdmin } = useAuth();
   const { website: managedWebsite, ready: contentReady } = useSiteContent();
@@ -84,15 +129,57 @@ export function Layout({
   useEffect(() => setOpen(false), [pathname]);
   useEffect(() => {
     if (!open) return;
-    navigationRef.current?.querySelector<HTMLAnchorElement>("a")?.focus();
+    const navigation = navigationRef.current;
+    const main = mainRef.current;
+    const footer = footerRef.current;
+    const bodyOverflow = document.body.style.overflow;
+    const menuButton = menuButtonRef.current;
+    const brand = brandRef.current;
+    const headerActions = headerActionsRef.current;
+    const menuLinks = Array.from(
+      navigation?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? [],
+    );
+    const focusable = menuButton ? [menuButton, ...menuLinks] : menuLinks;
+
+    brand?.setAttribute("inert", "");
+    headerActions?.setAttribute("inert", "");
+    if (!previewMode) {
+      main?.setAttribute("inert", "");
+      footer?.setAttribute("inert", "");
+      document.body.style.overflow = "hidden";
+    }
+    menuLinks[0]?.focus();
+
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      menuButtonRef.current?.focus();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        menuButton?.focus();
+        return;
+      }
+      if (event.key !== "Tab" || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      brand?.removeAttribute("inert");
+      headerActions?.removeAttribute("inert");
+      if (!previewMode) {
+        main?.removeAttribute("inert");
+        footer?.removeAttribute("inert");
+        document.body.style.overflow = bodyOverflow;
+      }
+    };
+  }, [open, previewMode]);
   useEffect(() => {
     if (previewMode) return;
     const meta = document.querySelector<HTMLMetaElement>(
@@ -120,6 +207,7 @@ export function Layout({
   const headerState = isHome && !scrolled ? "is-overlay" : "is-surface";
 
   const footer = theme.footer;
+  const publishedLegalPolicies = getPublishedLegalPolicies();
   const website = managedWebsite as typeof managedWebsite | undefined;
   const configuredPrimaryNavigation = (
     website?.navigation.primary ?? [
@@ -212,6 +300,7 @@ export function Layout({
       ],
     },
   ];
+  const visibleFooterGroups = getVisibleFooterGroups(footerGroups, isAdmin);
   if (contentReady === false && !previewMode) {
     return (
       <div className="site-shell public-site-loading" data-theme-typography={theme.typography} style={siteThemeCssVariables(theme)} aria-busy="true">
@@ -244,6 +333,7 @@ export function Layout({
         data-editor-target={previewMode ? "header" : undefined}
       >
         <Link
+          ref={brandRef}
           className={`brand brand-${theme.logo.mode}`}
           to="/"
           aria-label={`${theme.header.brandName} home`}
@@ -266,7 +356,9 @@ export function Layout({
           ref={navigationRef}
           id="main-nav"
           className={open ? "nav open" : "nav"}
-          aria-label="Main navigation"
+          role={open ? "dialog" : undefined}
+          aria-modal={open ? "true" : undefined}
+          aria-label={open ? "Site navigation menu" : "Main navigation"}
         >
           {primaryNavigation.map((item) => (
             <DestinationLink
@@ -279,7 +371,7 @@ export function Layout({
             </DestinationLink>
           ))}
         </nav>
-        <div className="header-actions">
+        <div ref={headerActionsRef} className="header-actions">
           <Link
             className="icon-link"
             to="/account"
@@ -297,10 +389,10 @@ export function Layout({
           </Link>
         </div>
       </header>
-      <main id="main">
+      <main id="main" ref={mainRef}>
         <PageTransition>{children}</PageTransition>
       </main>
-      <footer className="footer editorial-footer" data-editor-target={previewMode ? "footer" : undefined}>
+      <footer ref={footerRef} className="footer editorial-footer" data-editor-target={previewMode ? "footer" : undefined}>
         <div className="footer-introduction">
           <div className={`brand footer-brand brand-${theme.logo.mode}`}>
             <SiteBrand theme={theme} placement="footer" />
@@ -309,21 +401,26 @@ export function Layout({
           <Link className="footer-newsletter-link" to="/account/mailing-list">Join the newsletter <span aria-hidden="true">→</span></Link>
         </div>
         <div className="footer-navigation">
-        {footerGroups.map((group) => (
+        {visibleFooterGroups.map((group) => (
           <div className="footer-link-group" key={group.id}>
             <h2>{group.heading}</h2>
-            {group.links
-              .filter(
-                (item) =>
-                  item.visible && (item.id !== "administrator" || isAdmin),
-              )
-              .map((item) => (
+            {group.links.map((item) => (
                 <DestinationLink key={item.id} destination={item.id === "journal" ? "/journal" : item.path}>
                   {item.label.replace(/^Instragram$/i, "Instagram")}
                 </DestinationLink>
               ))}
           </div>
         ))}
+        {publishedLegalPolicies.length > 0 && (
+          <div className="footer-link-group">
+            <h2>Legal</h2>
+            {publishedLegalPolicies.map((policy) => (
+              <Link key={policy.slug} to={legalPolicyPath(policy.slug)}>
+                {policy.navigationLabel}
+              </Link>
+            ))}
+          </div>
+        )}
         </div>
         <div className="footer-contact">
           <h2>Contact</h2>

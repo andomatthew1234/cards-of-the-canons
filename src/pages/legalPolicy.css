@@ -1,0 +1,127 @@
+.legal-policy-shell {
+  width: min(100% - 2rem, 76rem);
+  margin-inline: auto;
+  padding: clamp(7rem, 11vw, 10rem) 0 clamp(4rem, 8vw, 7rem);
+  color: var(--ink, #2b0000);
+}
+
+.legal-policy-header {
+  max-width: 52rem;
+  padding-bottom: clamp(2rem, 5vw, 4rem);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.legal-policy-header h1,
+.legal-policy-unavailable h1 {
+  max-width: 18ch;
+  margin: 0.35rem 0 1rem;
+  font-size: clamp(2.5rem, 7vw, 5.5rem);
+  line-height: 0.96;
+  text-wrap: balance;
+}
+
+.legal-policy-header > p:not(.eyebrow),
+.legal-policy-unavailable > p:not(.eyebrow) {
+  max-width: 66ch;
+  font-size: clamp(1rem, 1.4vw, 1.2rem);
+  line-height: 1.7;
+}
+
+.legal-policy-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2.5rem;
+  margin: 2rem 0 0;
+}
+
+.legal-policy-metadata div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.legal-policy-metadata dt {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.legal-policy-metadata dd {
+  margin: 0;
+}
+
+.legal-policy-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(2rem, 5vw, 4rem);
+  max-width: 52rem;
+  padding-block: clamp(2.5rem, 6vw, 5rem);
+}
+
+.legal-policy-content section {
+  scroll-margin-top: 7rem;
+}
+
+.legal-policy-content h2 {
+  margin: 0 0 1rem;
+  font-size: clamp(1.6rem, 3vw, 2.35rem);
+  line-height: 1.12;
+  text-wrap: balance;
+}
+
+.legal-policy-content p,
+.legal-policy-content li {
+  line-height: 1.75;
+}
+
+.legal-policy-content ul {
+  padding-inline-start: 1.4rem;
+}
+
+.legal-policy-footer {
+  max-width: 52rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+}
+
+.legal-policy-unavailable {
+  min-height: min(44rem, 80svh);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.legal-policy-unavailable > svg {
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.legal-policy-unavailable .button-row {
+  align-items: center;
+  margin-top: 1.25rem;
+}
+
+.legal-policy-unavailable .text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.legal-policy-unavailable .text-link svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+@media (max-width: 30rem) {
+  .legal-policy-shell {
+    width: min(100% - 1.25rem, 76rem);
+  }
+
+  .legal-policy-header h1,
+  .legal-policy-unavailable h1 {
+    font-size: clamp(2.25rem, 13vw, 3.5rem);
+    overflow-wrap: anywhere;
+  }
+}

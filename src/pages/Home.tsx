@@ -1,11 +1,11 @@
 import { ArrowDown, ArrowLeft, ArrowRight, BookOpen, Landmark, ScrollText, ShieldCheck, Sparkles, UsersRound, type LucideIcon } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type TransitionEvent as ReactTransitionEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { CatalogueEmpty, CatalogueLoading, CatalogueUnavailable } from '../components/CatalogueState'
 import { Newsletter } from '../components/Newsletter'
 import { PageMeta } from '../components/PageMeta'
 import { ProductCard } from '../components/ProductCard'
-import { circularWindow, wrapIndex } from '../lib/carousel'
+import { carouselTrackWindow, wrapIndex } from '../lib/carousel'
 import { Reveal } from '../components/Reveal'
 import { SafeRichText } from '../components/SafeRichText'
 import { useCatalogState } from '../context/CatalogContext'
@@ -16,6 +16,8 @@ import type { Product } from '../types'
 
 type StoryPoint = { icon: LucideIcon; title: string; body: string }
 type NavigatorWithConnection = Navigator & { connection?: { saveData?: boolean } }
+type CarouselDirection = -1 | 1
+type CarouselMotion = { direction: CarouselDirection; active: boolean }
 
 function canPlayHeroVideo() {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
@@ -108,7 +110,7 @@ function HomeHeroVideo({ onReadyChange }: { onReadyChange: (ready: boolean) => v
     muted
     loop
     playsInline
-    preload="auto"
+    preload="metadata"
     poster={heroPoster}
     aria-hidden="true"
     tabIndex={-1}
@@ -192,7 +194,7 @@ export function ParallaxFigure({ src }: { src: string }) {
     <div className="home-history-image">
       <button className={`home-history-flip${flipped ? ' is-flipped' : ''}`} type="button" aria-pressed={flipped} aria-label={flipped ? 'Show the front of the Doxa card' : 'Show the back of the Doxa card'} onClick={() => setFlipped((current) => !current)}>
         <span className="home-history-flip-inner">
-          <span className="home-history-face home-history-front"><img src={src} alt="" loading="eager" decoding="async" /></span>
+          <span className="home-history-face home-history-front"><img src={src} alt="" loading="lazy" decoding="async" /></span>
           <span className="home-history-face home-history-back" aria-hidden="true"><span className="home-card-back-mark">D</span><strong>Doxa</strong><small>Treasury</small><span className="home-card-back-rule" /></span>
         </span>
       </button>
@@ -228,61 +230,153 @@ function CandlePanel({ side }: { side: 'left' | 'right' }) {
   </div>
 }
 
-function InformationGrid({ items }: { items: StoryPoint[] }) {
+function prefersReducedCarouselMotion() {
+  return typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function useSlidingCarousel(itemCount: number, visibleCount: number, rotateWhenAllVisible = false) {
   const [start, setStart] = useState(0)
-  const [direction, setDirection] = useState<1 | -1>(1)
-  const at = (offset: number) => items[wrapIndex(start + offset, items.length)]
-  const move = (nextDirection: 1 | -1) => { setDirection(nextDirection); setStart((current) => wrapIndex(current + nextDirection, items.length)) }
-  const visibleItems = [at(0), at(1), at(2)]
+  const [motion, setMotion] = useState<CarouselMotion | null>(null)
+  const motionRef = useRef<CarouselMotion | null>(null)
+
+  const finish = useCallback(() => {
+    const current = motionRef.current
+    if (!current) return
+    motionRef.current = null
+    setStart((value) => value + current.direction)
+    setMotion(null)
+  }, [itemCount])
+
+  useEffect(() => {
+    motionRef.current = null
+    setMotion(null)
+    setStart((current) => wrapIndex(current, itemCount))
+  }, [itemCount, visibleCount])
+
+  useEffect(() => {
+    if (!motion || motion.active) return
+    const frame = window.requestAnimationFrame(() => {
+      setMotion((current) => {
+        if (!current) return null
+        const activeMotion = { ...current, active: true }
+        motionRef.current = activeMotion
+        return activeMotion
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [motion])
+
+  useEffect(() => {
+    if (!motion?.active) return
+    const fallback = window.setTimeout(finish, 720)
+    return () => window.clearTimeout(fallback)
+  }, [finish, motion?.active])
+
+  const move = useCallback((direction: CarouselDirection) => {
+    if (itemCount <= 1 || (!rotateWhenAllVisible && itemCount <= visibleCount) || motionRef.current) return
+    if (prefersReducedCarouselMotion()) {
+      setStart((current) => current + direction)
+      return
+    }
+    const nextMotion = { direction, active: false }
+    motionRef.current = nextMotion
+    setMotion(nextMotion)
+  }, [itemCount, rotateWhenAllVisible, visibleCount])
+
+  const onKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    event.preventDefault()
+    move(event.key === 'ArrowLeft' ? -1 : 1)
+  }, [move])
+
+  const onTransitionEnd = useCallback((event: ReactTransitionEvent<HTMLElement>) => {
+    if (event.target === event.currentTarget && event.propertyName === 'transform') finish()
+  }, [finish])
+
+  return { start, motion, move, onKeyDown, onTransitionEnd }
+}
+
+function carouselTrackClass(base: string, motion: CarouselMotion | null) {
+  if (!motion) return base
+  return `${base} is-${motion.direction > 0 ? 'next' : 'previous'}${motion.active ? ' is-active' : ''}`
+}
+
+export function InformationGrid({ items }: { items: StoryPoint[] }) {
+  const [visibleCount, setVisibleCount] = useState(3)
+  useEffect(() => {
+    const update = () => setVisibleCount(window.innerWidth < 640 ? 1 : 3)
+    update()
+    window.addEventListener('resize', update, { passive: true })
+    return () => window.removeEventListener('resize', update)
+  }, [])
+  const carousel = useSlidingCarousel(items.length, visibleCount, true)
+  const trackItems = carouselTrackWindow(items, carousel.start, visibleCount, carousel.motion?.direction ?? null)
+  const at = (offset: number) => items[wrapIndex(carousel.start + offset, items.length)]
+  const extraIndex = carousel.motion?.direction === -1 ? 0 : trackItems.length - 1
+  const trackStart = carousel.start + (carousel.motion?.direction === -1 ? -1 : 0)
+
   return <section className="home-information home-stage home-texture home-texture-terra" aria-label="Why Doxa">
-    <div className="home-information-carousel">
+    <div className="home-information-carousel" role="region" aria-roledescription="carousel" aria-label="Why Doxa information" tabIndex={0} onKeyDown={carousel.onKeyDown}>
       <article className="home-information-card home-information-ghost is-left" aria-hidden="true"><h3>{churchCase(at(-1).title)}</h3><p>{churchCase(at(-1).body)}</p></article>
-      <div className={`home-information-grid ${direction > 0 ? 'is-next' : 'is-previous'}`} key={`${start}-${direction}`} aria-live="polite">
-        {visibleItems.map((item, index) => {
-        const Icon = item.icon
-        return <article className="home-information-card" key={`${start}-${item.title}`}>
-          <span className="home-information-number" aria-hidden="true">0{index + 1}</span>
-          <span className="home-information-icon"><Icon aria-hidden="true" /></span>
-          <h3>{churchCase(item.title)}</h3>
-          <p>{churchCase(item.body)}</p>
-        </article>
-      })}
+      <div className="home-information-grid">
+        <div
+          className={carouselTrackClass('home-information-track', carousel.motion)}
+          data-visible-count={visibleCount}
+          onTransitionEnd={carousel.onTransitionEnd}
+        >
+          {trackItems.map((item, index) => {
+            const Icon = item.icon
+            const itemNumber = items.indexOf(item) + 1
+            return <article className="home-information-card" key={`${items.indexOf(item)}-${trackStart + index}`} aria-hidden={carousel.motion ? index === extraIndex : undefined}>
+              <span className="home-information-number" aria-hidden="true">0{itemNumber}</span>
+              <span className="home-information-icon"><Icon aria-hidden="true" /></span>
+              <h3>{churchCase(item.title)}</h3>
+              <p>{churchCase(item.body)}</p>
+            </article>
+          })}
+        </div>
       </div>
-      <article className="home-information-card home-information-ghost is-right" aria-hidden="true"><h3>{churchCase(at(3).title)}</h3><p>{churchCase(at(3).body)}</p></article>
-      <button className="home-information-arrow previous" type="button" aria-label="Previous information" onClick={() => move(-1)}><ArrowLeft /></button>
-      <button className="home-information-arrow next" type="button" aria-label="Next information" onClick={() => move(1)}><ArrowRight /></button>
+      <article className="home-information-card home-information-ghost is-right" aria-hidden="true"><h3>{churchCase(at(visibleCount).title)}</h3><p>{churchCase(at(visibleCount).body)}</p></article>
+      <button className="home-information-arrow previous" type="button" aria-label="Previous information" disabled={Boolean(carousel.motion)} onClick={() => carousel.move(-1)}><ArrowLeft aria-hidden="true" /></button>
+      <button className="home-information-arrow next" type="button" aria-label="Next information" disabled={Boolean(carousel.motion)} onClick={() => carousel.move(1)}><ArrowRight aria-hidden="true" /></button>
+      <span className="sr-only" role="status" aria-live="polite">Information {wrapIndex(carousel.start, items.length) + 1} of {items.length}</span>
     </div>
   </section>
 }
 
-function HomeProductCarousel({ products }: { products: Product[] }) {
-  const [start, setStart] = useState(0)
-  const [direction, setDirection] = useState<1 | -1>(1)
+export function HomeProductCarousel({ products }: { products: Product[] }) {
   const [visibleCount, setVisibleCount] = useState(3)
-
   useEffect(() => {
     const update = () => setVisibleCount(window.innerWidth < 640 ? 1 : window.innerWidth < 980 ? 2 : 3)
     update()
-    window.addEventListener('resize', update)
+    window.addEventListener('resize', update, { passive: true })
     return () => window.removeEventListener('resize', update)
   }, [])
-
-  useEffect(() => setStart((current) => wrapIndex(current, products.length)), [products.length])
-  const visible = circularWindow(products, start, visibleCount)
+  const carousel = useSlidingCarousel(products.length, visibleCount)
+  const trackProducts = carouselTrackWindow(products, carousel.start, visibleCount, carousel.motion?.direction ?? null)
   const canRotate = products.length > Math.min(visibleCount, products.length)
-  const move = (nextDirection: 1 | -1) => {
-    setDirection(nextDirection)
-    setStart((current) => wrapIndex(current + nextDirection, products.length))
-  }
+  const extraIndex = carousel.motion?.direction === -1 ? 0 : trackProducts.length - 1
+  const trackStart = carousel.start + (carousel.motion?.direction === -1 ? -1 : 0)
 
-  return <div className="home-product-carousel" aria-roledescription="carousel" aria-label="Explore the collection">
-    <div className={`home-product-showcase ${direction > 0 ? 'is-next' : 'is-previous'}`} key={`${start}-${visibleCount}-${direction}`} aria-live="polite">
-      {visible.map((product) => <ProductCard key={product.id} product={product} variant="compact" />)}
+  return <div className="home-product-carousel" role="region" aria-roledescription="carousel" aria-label="Explore the collection" tabIndex={0} onKeyDown={carousel.onKeyDown}>
+    <div className="home-product-showcase">
+      <div
+        className={carouselTrackClass('home-product-track', carousel.motion)}
+        data-visible-count={visibleCount}
+        onTransitionEnd={carousel.onTransitionEnd}
+      >
+        {trackProducts.map((product, index) => {
+          const isTransitionOnlySlide = Boolean(carousel.motion) && index === extraIndex
+          return <div className="home-product-slide" key={`${product.id}-${trackStart + index}`} aria-hidden={isTransitionOnlySlide || undefined} inert={isTransitionOnlySlide || undefined}><ProductCard product={product} variant="compact" /></div>
+        })}
+      </div>
     </div>
     {canRotate && <>
-      <button className="home-product-arrow previous" type="button" aria-label="Previous product" onClick={() => move(-1)}><ArrowLeft /></button>
-      <button className="home-product-arrow next" type="button" aria-label="Next product" onClick={() => move(1)}><ArrowRight /></button>
-      <span className="home-product-page" aria-label={`Product ${start + 1} of ${products.length}`}>{start + 1} / {products.length}</span>
+      <button className="home-product-arrow previous" type="button" aria-label="Previous product" disabled={Boolean(carousel.motion)} onClick={() => carousel.move(-1)}><ArrowLeft aria-hidden="true" /></button>
+      <button className="home-product-arrow next" type="button" aria-label="Next product" disabled={Boolean(carousel.motion)} onClick={() => carousel.move(1)}><ArrowRight aria-hidden="true" /></button>
+      <span className="home-product-page" aria-hidden="true">{wrapIndex(carousel.start, products.length) + 1} / {products.length}</span>
+      <span className="sr-only" role="status" aria-live="polite">Product {wrapIndex(carousel.start, products.length) + 1} of {products.length}</span>
     </>}
   </div>
 }
@@ -368,10 +462,6 @@ export function Home({ previewMode = false }: { previewMode?: boolean }) {
       </section>
       <section className="home-origins" aria-labelledby="home-origins-title">
         <Reveal><Landmark aria-hidden="true" /><p className="eyebrow">Humble beginnings</p><h2 id="home-origins-title">Made to share what is worth remembering.</h2><p>Doxa began with a simple conviction: the beauty and history of the Church should be easier to encounter, hold and pass on.</p><Link className="button secondary" to="/about">Our story <ArrowRight aria-hidden="true" /></Link></Reveal>
-      </section>
-      <section className="home-reviews" aria-labelledby="home-reviews-title">
-        <Reveal><p className="eyebrow">From the community</p><h2 id="home-reviews-title">Stories from collectors</h2><p>Verified customer reviews will be shared here as the Doxa community grows.</p></Reveal>
-        <div className="home-reviews-controls" aria-hidden="true"><button type="button" disabled><ArrowLeft /></button><span>Reviews coming soon</span><button type="button" disabled><ArrowRight /></button></div>
       </section>
     </>
   }

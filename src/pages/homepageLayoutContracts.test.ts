@@ -15,16 +15,17 @@ describe('homepage layout contracts', () => {
     expect(mediaRule).toContain('overflow: hidden')
   })
 
-  it('keeps directional product and information motion available', () => {
-    expect(css).toContain('.home-product-showcase.is-next')
-    expect(css).toContain('.home-information-grid.is-previous')
-    expect(css).toContain('@keyframes home-carousel-next')
-    expect(css).toContain('@keyframes home-carousel-previous')
+  it('uses directional transform tracks without whole-grid flashing', () => {
+    expect(css).toContain('.home-product-track.is-next.is-active')
+    expect(css).toContain('.home-information-track.is-previous.is-active')
+    expect(css).toContain('transition: transform 480ms')
+    expect(css).not.toContain('@keyframes home-carousel-next')
+    expect(css).not.toContain('filter: blur(3px)')
   })
 
-  it('allows all three information cards to shrink inside tablet viewports', () => {
+  it('keeps information tracks fluid inside tablet viewports', () => {
     const tabletRules = css.match(/@media \(max-width: 979px\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
-    expect(tabletRules).toContain('.home-information-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }')
+    expect(css).toContain('grid-auto-columns: calc((100% - (2 * var(--home-carousel-gap))) / 3)')
     expect(tabletRules).not.toContain('minmax(270px, 1fr)')
   })
 

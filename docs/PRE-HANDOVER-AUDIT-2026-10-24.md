@@ -107,6 +107,8 @@ The server-side payment design is reassuringly fail-closed: it validates product
 
 ### 7. Add public legal-policy routes before accepting real orders
 
+**Phase 3 update — implementation complete, approved copy still required:** stable Privacy, Terms, Shipping, and Returns routes now share an approval-gated, versioned policy model. Pending policies are `noindex`, omitted from the footer, and cannot be mistaken for operative wording. Exact content remains correctly blocked on client/legal-adviser approval, as documented in `docs/PHASE-3-PUBLIC-EXPERIENCE.md`.
+
 **Confirmed:** there are no public Privacy, Terms, Shipping, or Returns/Refund routes. The private Account “Privacy & data” screen is not a public policy. This audit does not prescribe the client’s legal wording.
 
 **Required development work:** provide stable, accessible, linkable public policy pages and footer/checkout links; add a version/effective-date mechanism; ensure acceptance records point to an immutable version where needed. The client or legal adviser supplies and approves the wording.
@@ -144,11 +146,15 @@ Add explicit loading, error, empty, and stale states with retry. Never allow fal
 
 ### 11. Fix narrow-mobile clipping in the mission heading
 
+**Phase 3 update — resolved on 24 October 2026:** the intended two-line treatment is preserved where it fits and safely reflows at the narrowest breakpoint. The 320 px built-site pass no longer clips the title or creates horizontal overflow.
+
 The two-line title requirement is implemented with two forced `nowrap` spans (`Home.tsx:133-139,348`; `homepage.css:351-354`). At 320–375 px the second line cannot fit and the page shell clips overflow.
 
 Keep two lines where space permits, but allow a smaller responsive type treatment or safe wrapping at the narrowest breakpoint. Verify at 320, 360, 375, and 390 px with 200% text zoom.
 
 ### 12. Remove or gate broken social links and unfinished public blocks
+
+**Phase 3 update — resolved on 24 October 2026:** placeholder and invalid social destinations are rejected, empty footer groups are removed, the stored Instagram typo is normalised at display time, and unfinished About/Home review/social panels are no longer public.
 
 **Confirmed live CMS state:** footer Instagram, TikTok, YouTube, and Facebook labels all navigate to `/home`; `Instragram` is misspelled in stored CMS data. About displays “Links coming soon” and “Reviews coming soon”; Home displays a full disabled reviews control labelled “Reviews coming soon.”
 
@@ -184,6 +190,8 @@ Add CSP reporting, inventory violations, constrain arbitrary off-site media URLs
 
 ### 17. Add route-change focus management and complete mobile drawer accessibility
 
+**Phase 3 update — public experience resolved on 24 October 2026:** public route changes focus and announce the new heading, including lazy routes. The public mobile menu now exposes dialog semantics, traps focus, supports Escape, restores trigger focus, locks background scrolling, and makes background regions inert. The separate admin-drawer portion remains tracked with admin UI work.
+
 SPA route changes scroll to the top but do not move focus or announce the new page. Keyboard/screen-reader users can remain focused on an element from the previous page. The public mobile menu and admin mobile drawer also lack a complete modal focus boundary; the admin drawer has no dialog semantics, Escape handling, focus trap/restoration, or inert background.
 
 Move focus to the page heading/main region after navigation, add an announcement where appropriate, and implement/test accessible modal-drawer behaviour.
@@ -192,11 +200,15 @@ Move focus to the page heading/main region after navigation, add an announcement
 
 ### 18. Replace whole-grid carousel flashing with a continuous item transition
 
+**Phase 3 update — resolved on 24 October 2026:** product and information carousels now use stable transform tracks, move one item at a time, wrap continuously, reject overlapping commands, support arrow keys, announce position, and disable motion when the visitor requests reduced motion.
+
 Product and information controls correctly advance one item and wrap, and reduced-motion is supported. However, each click remounts and animates the whole visible grid from low opacity/blur. Repeated cards flash together rather than moving as a continuous carousel.
 
 Preserve stable items, animate outgoing and incoming positions in the selected direction, block double-trigger races, support keyboard controls, and consider touch swiping as optional P3 polish.
 
 ### 19. Reduce first-load and mobile payloads
+
+**Phase 3 update — improved and release-gated on 24 October 2026:** public routes are split closer to use, hero media preloads metadata rather than the complete file, below-fold card imagery is lazy, and the release command enforces budgets for initial JS/CSS, both hero variants, and the poster. The Phase 3 build measured 344.3 KiB initial JavaScript gzip and 63.2 KiB initial CSS gzip; the 1.61 MiB mobile and 3.23 MiB desktop hero variants passed their caps. Further Firebase and CSS reduction remains worthwhile maintenance work.
 
 The production build succeeds but warns about large chunks: main JS is about 615 KB minified, Firebase about 590 KB, Admin about 287 KB, and CSS about 341 KB. Home also preloads a roughly 3.4 MB desktop hero video or 1.7 MB mobile video, and an eagerly loaded card image is roughly 968 KB. The public shell is client-rendered, so these resources directly affect first useful render.
 

@@ -14,6 +14,7 @@ const steps = [
   ['Functions build', ['--prefix', 'functions', 'run', 'build']],
   ['Firebase Rules tests', ['run', 'rules:test']],
   ['Production build', ['run', 'build']],
+  ['Public performance budgets', ['run', 'performance:check']],
   ['SEO validation', ['run', 'seo:check']],
 ]
 
