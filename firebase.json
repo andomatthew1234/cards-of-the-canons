@@ -1,0 +1,70 @@
+{
+  "hosting": {
+    "public": "dist",
+    "cleanUrls": true,
+    "trailingSlash": false,
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "**/*.env", "**/*.env.*", "**/*.local", "**/*.log", "**/*.map"],
+    "redirects": [
+      { "source": "/account/settings", "destination": "/account/security", "type": 301 },
+      { "source": "/account/settings/email", "destination": "/account/security/email", "type": 301 },
+      { "source": "/account/settings/email-code", "destination": "/account/security/email-code", "type": 301 },
+      { "source": "/account/settings/authenticator", "destination": "/account/security/authenticator", "type": 301 },
+      { "source": "/account/settings/delete", "destination": "/account/manage/delete", "type": 301 }
+    ],
+    "rewrites": [
+      { "source": "/newsletter/confirm", "destination": "/index.html" },
+      { "source": "/newsletter/unsubscribe", "destination": "/index.html" },
+      { "source": "/journal/**", "destination": "/index.html" },
+      { "source": "/account", "destination": "/private.html" },
+      { "source": "/account/**", "destination": "/private.html" },
+      { "source": "/admin", "destination": "/private.html" },
+      { "source": "/admin/**", "destination": "/private.html" },
+      { "source": "/cart", "destination": "/private.html" },
+      { "source": "/checkout/**", "destination": "/private.html" }
+    ],
+    "headers": [
+      { "source": "**/*.@(js|css)", "headers": [{ "key": "Cache-Control", "value": "public,max-age=31536000,immutable" }] },
+      { "source": "/account", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }] },
+      { "source": "/account/**", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }] },
+      { "source": "/admin", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }] },
+      { "source": "/admin/**", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }] },
+      { "source": "/cart", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }] },
+      { "source": "/checkout/**", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" }] },
+      { "source": "**", "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Content-Security-Policy", "value": "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'" },
+        { "key": "Content-Security-Policy-Report-Only", "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https://firebasestorage.googleapis.com https://lh3.googleusercontent.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.firebaseinstallations.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://api.stripe.com; frame-src 'self' https://accounts.google.com https://appleid.apple.com https://checkout.stripe.com; media-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" }
+      ] }
+    ]
+  },
+  "functions": [{
+    "source": "functions",
+    "codebase": "default",
+    "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"],
+    "ignore": ["node_modules", ".git", "firebase-debug.log", "firebase-debug.*.log"]
+  }],
+  "firestore": { "rules": "firestore.rules", "indexes": "firestore.indexes.json" },
+  "storage": { "rules": "storage.rules" },
+  "auth": {
+    "authorizedDomains": ["localhost", "127.0.0.1", "cards-of-canons-au-260930.web.app", "cards-of-canons-au-260930.firebaseapp.com", "doxatreasury.com"],
+    "providers": {
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "Doxa",
+        "supportEmail": "mumanderson10@gmail.com"
+      }
+    }
+  },
+  "emulators": {
+    "auth": { "port": 9099 },
+    "functions": { "port": 5001 },
+    "firestore": { "port": 8080 },
+    "hosting": { "port": 5000 },
+    "storage": { "port": 9199 },
+    "ui": { "enabled": true, "port": 4000 },
+    "singleProjectMode": true
+  }
+}

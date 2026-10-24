@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 920" role="img" aria-labelledby="title desc">
+  <title id="title">Twelve-card demonstration pack</title><desc id="desc">A complete demonstration card set, clearly stamped DEMO.</desc>
+  <rect width="800" height="920" fill="#eee2cb"/><rect x="92" y="62" width="616" height="796" rx="16" fill="#604331"/>
+  <rect x="119" y="89" width="562" height="742" rx="8" fill="none" stroke="#dfc383" stroke-width="3"/><text x="400" y="198" text-anchor="middle" fill="#f8f0df" font-family="Georgia,serif" font-size="48">THE COMPLETE SET</text>
+  <g fill="#ead6a9" stroke="#b38745" stroke-width="3"><rect x="197" y="279" width="165" height="229" rx="7" transform="rotate(-8 279 393)"/><rect x="438" y="279" width="165" height="229" rx="7" transform="rotate(8 520 393)"/><rect x="317" y="380" width="165" height="229" rx="7"/></g>
+  <text x="400" y="696" text-anchor="middle" fill="#e7c775" font-family="Arial,sans-serif" font-size="22" letter-spacing="4">12 CARDS • PREVIEW EDITION</text>
+  <g transform="rotate(-16 400 470)"><rect x="191" y="424" width="418" height="106" rx="6" fill="#9f342a" opacity=".96"/><text x="400" y="499" text-anchor="middle" fill="#fff4df" font-family="Arial,sans-serif" font-size="78" font-weight="700" letter-spacing="9">DEMO</text></g>
+</svg>

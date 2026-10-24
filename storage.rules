@@ -1,0 +1,42 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Administrator access is claim-based and honours the same server-owned
+    // account control record as Firestore, so a blocked administrator loses
+    // Storage writes immediately. No mailbox allowlist exists here either.
+    function controlBlocks(data) {
+      return ('disabled' in data && data.disabled == true) || ('deleted' in data && data.deleted == true);
+    }
+    function accountNotBlocked() {
+      return !firestore.exists(/databases/(default)/documents/accountControls/$(request.auth.uid))
+        || !controlBlocks(firestore.get(/databases/(default)/documents/accountControls/$(request.auth.uid)).data);
+    }
+    function isAdmin() {
+      return request.auth != null
+        && 'admin' in request.auth.token && request.auth.token.admin == true
+        && accountNotBlocked();
+    }
+    function validImage() { return request.resource != null && request.resource.size < 5 * 1024 * 1024 && request.resource.contentType.matches('image/(jpeg|png|webp)'); }
+
+    // Publication boundary:
+    //   1. clients upload only into their private staging area (no public read),
+    //   2. the `publishStagedImage` server function re-validates the bytes and
+    //      copies the object into a public prefix,
+    //   3. public prefixes are therefore readable by everybody and writable by
+    //      nobody through the client SDK — publication is server-only.
+    match /image-staging/{uid}/{fileName} {
+      allow read: if isAdmin() && request.auth.uid == uid;
+      allow create, update: if isAdmin() && request.auth.uid == uid && validImage() && fileName.matches('^[A-Za-z0-9._-]{1,120}$');
+      allow delete: if isAdmin();
+    }
+    match /product-images/{productId}/{fileName} {
+      allow read: if true;
+      allow create, update, delete: if false;
+    }
+    match /page-images/{pageId}/{fileName} {
+      allow read: if true;
+      allow create, update, delete: if false;
+    }
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}

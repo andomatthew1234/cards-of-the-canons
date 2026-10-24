@@ -1,0 +1,444 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Assumed data model:
+    // products/{id}: bounded catalogue fields; public only when status=published.
+    // usersPrivate/{uid}: displayName/email/optional phone and timestamps; owner/admin read,
+    // server-owned mutations only (profile callable).
+    // websiteContent/published: one atomic, server-published public website snapshot.
+    // websiteContentDrafts, websiteContentVersions and websiteMediaLocks: callable-only.
+    // pageContent/{id}, siteSettings/{id}: server-owned compatibility projections;
+    // articles/{id}: bounded editorial content, public only when published.
+    // enquiries/{id}, newsletterSubscribers/{id}: private PII, created by trusted Functions.
+    // orders/{id}: immutable server-written commercial snapshot; owner/admin read only.
+    // accountSecurity/{uid}: server-owned security-method policy; exposed only through
+    // a sanitising, authenticated callable. Future challenge records remain server-only.
+    // accountActivity/{uid}/activityEvents/{eventId}: bounded, server-written audit
+    // events; only the enabled owner can read their exact private subcollection.
+    // accountRoles/{uid}: server-owned role records (owner/admin/member). Written only
+    // by trusted operator tooling; never writable or forgeable from a client, which is
+    // what makes owner/last-owner protection verifiable at the rules layer.
+    // analyticsEvents/{id}: anonymous, immutable, schema-bounded interaction event;
+    // public create only, administrator read only, and no PII fields.
+    // communitySurveys/{id}: administrator-authored draft/open/closed survey content.
+    // responses/{uid}: server-validated answers and a trusted respondent snapshot;
+    // readable only by that enabled account or an administrator. Every write is
+    // performed by revocation-checked, App-Check-protected callable Functions.
+    function signedIn() { return request.auth != null; }
+    function owner(uid) { return signedIn() && request.auth.uid == uid; }
+    // Administrator access is a server-issued custom claim only: no mailbox
+    // allowlist exists here, in the UI, or in Storage. A blocked administrator
+    // loses every admin rule immediately through the server-owned control record.
+    function isAdmin() {
+      return signedIn()
+        && 'admin' in request.auth.token && request.auth.token.admin == true
+        && accountEnabled(request.auth.uid);
+    }
+    // URL allowlist at the rules boundary: only site-local image paths or the
+    // Firebase Storage bucket are accepted, so a client can never store a
+    // scriptable or off-host URL that later lands in markup, CSP reports or
+    // the SEO generator.
+    function validUrl(value) {
+      return value is string
+        && value.size() <= 2048
+        && (value.matches('^/images/[A-Za-z0-9._/-]+$')
+            || value.matches('^https://firebasestorage\\.googleapis\\.com/[A-Za-z0-9?&=._~%/-]+$'));
+    }
+    // Product documents cannot point at the page-image library. That separation
+    // is what makes reference-aware website-media deletion race-free: product
+    // writers can only select bundled images or objects under product-images.
+    function validProductImageUrl(value) {
+      return validUrl(value)
+        && (value.matches('^/images/[A-Za-z0-9._/-]+$')
+            || value.matches('^https://firebasestorage\\.googleapis\\.com/.*/o/product-images%2F[A-Za-z0-9._%~-]+%2F[A-Za-z0-9._%~-]+\\?[A-Za-z0-9?&=._~%/-]+$'));
+    }
+    // Strict slugs are enforced wherever a route or path segment is built from
+    // stored data (products and articles), matching the build-time generator.
+    function validSlug(value) { return value is string && value.size() >= 2 && value.size() <= 100 && value.matches('^[a-z0-9]+(-[a-z0-9]+)*$'); }
+    function validEmail(value) { return value is string && value.size() >= 3 && value.size() <= 160 && value.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'); }
+    function validOptionalTimestamp(data, field) { return !(field in data) || data[field] is timestamp; }
+    // Missing optional flags fail safe: an absent `deleted` (a plain disable
+    // record) must never lock a valid, enabled user out of their own data,
+    // while an explicit `true` always blocks.
+    function controlBlocks(data) {
+      return ('disabled' in data && data.disabled == true) || ('deleted' in data && data.deleted == true);
+    }
+    function accountEnabled(uid) {
+      return !exists(/databases/$(database)/documents/accountControls/$(uid))
+        || !controlBlocks(get(/databases/$(database)/documents/accountControls/$(uid)).data);
+    }
+    // Owner protection reads a server-owned role record rather than any
+    // mailbox address, so changing roles is an operator action, not a client
+    // one, and the check keeps working after migrations.
+    function isOwner(uid) {
+      return exists(/databases/$(database)/documents/accountRoles/$(uid))
+        && 'role' in get(/databases/$(database)/documents/accountRoles/$(uid)).data
+        && get(/databases/$(database)/documents/accountRoles/$(uid)).data.role == 'owner';
+    }
+    // A deletion tombstone can never be cleared or removed by a client write.
+    function keepsTombstone() {
+      return resource == null
+        || !('deleted' in resource.data)
+        || resource.data.deleted != true
+        || ('deleted' in request.resource.data && request.resource.data.deleted == true);
+    }
+    function validAccountControl(data) {
+      return data.keys().hasAll(['disabled','updatedAt'])
+        && data.keys().hasOnly(['disabled','deleted','deletedAt','deletionState','updatedAt'])
+        && data.disabled is bool
+        && (!('deleted' in data) || data.deleted is bool)
+        && (!('deletionState' in data) || data.deletionState in ['pending','complete'])
+        && (!('deletedAt' in data) || data.deletedAt is timestamp)
+        && data.updatedAt is timestamp;
+    }
+    function validProduct(data) {
+      return data.keys().hasAll(['slug','name','shortDescription','description','priceCents','currency','imageUrl','imageAlt','category','featured','stock','status'])
+        && data.keys().hasOnly(['slug','name','shortDescription','description','priceCents','currency','imageUrl','imageAlt','category','featured','stock','status','createdAt','updatedAt'])
+        && validSlug(data.slug)
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 120
+        && data.shortDescription is string && data.shortDescription.size() >= 2 && data.shortDescription.size() <= 300
+        && data.description is string && data.description.size() >= 2 && data.description.size() <= 5000
+        && data.priceCents is int && data.priceCents >= 0 && data.priceCents <= 100000000
+        && data.currency == 'AUD' && validProductImageUrl(data.imageUrl)
+        && data.imageAlt is string && data.imageAlt.size() <= 200
+        && data.category is string && data.category.size() >= 2 && data.category.size() <= 80
+        && data.featured is bool && (data.stock == null || (data.stock is int && data.stock >= 0 && data.stock <= 1000000))
+        && data.status in ['draft','published']
+        && validOptionalTimestamp(data, 'createdAt') && validOptionalTimestamp(data, 'updatedAt');
+    }
+    function validHomeHero(data) {
+      return data is map
+        && data.keys().hasAll(['accent','imageUrl','imageAlt','imageCredit','primaryActionLabel','secondaryActionLabel'])
+        && data.keys().hasOnly(['accent','imageUrl','imageAlt','imageCredit','primaryActionLabel','secondaryActionLabel'])
+        && data.accent is string && data.accent.size() <= 80
+        && validUrl(data.imageUrl) && data.imageAlt is string && data.imageAlt.size() >= 2 && data.imageAlt.size() <= 200
+        && data.imageCredit is string && data.imageCredit.size() <= 240
+        && data.primaryActionLabel is string && data.primaryActionLabel.size() >= 2 && data.primaryActionLabel.size() <= 60
+        && data.secondaryActionLabel is string && data.secondaryActionLabel.size() >= 2 && data.secondaryActionLabel.size() <= 60;
+    }
+    function validHomeValues(data) {
+      return data is map
+        && data.keys().hasAll(['firstTitle','firstBody','secondTitle','secondBody','thirdTitle','thirdBody','marquee'])
+        && data.keys().hasOnly(['firstTitle','firstBody','secondTitle','secondBody','thirdTitle','thirdBody','marquee'])
+        && data.firstTitle is string && data.firstTitle.size() >= 2 && data.firstTitle.size() <= 80
+        && data.secondTitle is string && data.secondTitle.size() >= 2 && data.secondTitle.size() <= 80
+        && data.thirdTitle is string && data.thirdTitle.size() >= 2 && data.thirdTitle.size() <= 80
+        && data.firstBody is string && data.firstBody.size() >= 2 && data.firstBody.size() <= 160
+        && data.secondBody is string && data.secondBody.size() >= 2 && data.secondBody.size() <= 160
+        && data.thirdBody is string && data.thirdBody.size() >= 2 && data.thirdBody.size() <= 160
+        && data.marquee is string && data.marquee.size() >= 2 && data.marquee.size() <= 320;
+    }
+    function validHomeFeatured(data) {
+      return data is map
+        && data.keys().hasAll(['eyebrow','title','body']) && data.keys().hasOnly(['eyebrow','title','body'])
+        && data.eyebrow is string && data.eyebrow.size() >= 2 && data.eyebrow.size() <= 80
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
+        && data.body is string && data.body.size() >= 2 && data.body.size() <= 1000;
+    }
+    function validHomeStory(data) {
+      return data is map
+        && data.keys().hasAll(['eyebrow','title','body','imageUrl','imageAlt','imageCredit','actionLabel'])
+        && data.keys().hasOnly(['eyebrow','title','body','imageUrl','imageAlt','imageCredit','actionLabel'])
+        && data.eyebrow is string && data.eyebrow.size() >= 2 && data.eyebrow.size() <= 80
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
+        && data.body is string && data.body.size() >= 2 && data.body.size() <= 3000
+        && validUrl(data.imageUrl) && data.imageAlt is string && data.imageAlt.size() >= 2 && data.imageAlt.size() <= 200
+        && data.imageCredit is string && data.imageCredit.size() <= 240
+        && data.actionLabel is string && data.actionLabel.size() >= 2 && data.actionLabel.size() <= 60;
+    }
+    function validHomeSections(data) {
+      return data is map
+        && data.keys().hasAll(['hero','values','featured','story'])
+        && data.keys().hasOnly(['hero','values','featured','story'])
+        && validHomeHero(data.hero) && validHomeValues(data.values)
+        && validHomeFeatured(data.featured) && validHomeStory(data.story);
+    }
+    function validPage(data) {
+      return data.keys().hasAll(['page','eyebrow','title','body','status'])
+        && data.keys().hasOnly(['page','eyebrow','title','body','imageUrl','imageAlt','contentVersion','sections','status','updatedAt'])
+        && data.page in ['home','about']
+        && data.eyebrow is string && data.eyebrow.size() <= 80
+        && data.title is string && data.title.size() >= 2 && data.title.size() <= 160
+        && data.body is string && data.body.size() >= 2 && data.body.size() <= 10000
+        && (!('imageUrl' in data) || validUrl(data.imageUrl))
+        && (!('imageAlt' in data) || (data.imageAlt is string && data.imageAlt.size() <= 200))
+        && (!('contentVersion' in data) || (data.page == 'home' && data.contentVersion == 2))
+        && (!('sections' in data) || (data.page == 'home' && validHomeSections(data.sections)))
+        && data.status in ['draft','published'] && validOptionalTimestamp(data, 'updatedAt');
+    }
+    function validSettings(data) {
+      return data.keys().hasAll(['businessName','announcement','contactEmail','currency','status'])
+        && data.keys().hasOnly(['businessName','announcement','contactEmail','currency','status','theme','updatedAt'])
+        && data.businessName is string && data.businessName.size() >= 2 && data.businessName.size() <= 100
+        && data.announcement is string && data.announcement.size() <= 240
+        && validEmail(data.contactEmail)
+        && data.currency == 'AUD' && data.status in ['draft','published']
+        && (!('theme' in data) || validTheme(data.theme))
+        && validOptionalTimestamp(data, 'updatedAt');
+    }
+    function validThemeText(value, minimum, maximum) {
+      return value is string && value.size() >= minimum && value.size() <= maximum;
+    }
+    function validThemeColour(value) {
+      return value is string && value.matches('^#[0-9a-fA-F]{6}$');
+    }
+    function validThemePalette(data) {
+      return data is map
+        && data.keys().hasAll(['ink','brown','brownAccent','gold','goldLight','paper','cream','line','surface','muted','success','danger'])
+        && data.keys().hasOnly(['ink','brown','brownAccent','gold','goldLight','paper','cream','line','surface','muted','success','danger'])
+        && validThemeColour(data.ink) && validThemeColour(data.brown)
+        && validThemeColour(data.brownAccent) && validThemeColour(data.gold)
+        && validThemeColour(data.goldLight) && validThemeColour(data.paper)
+        && validThemeColour(data.cream) && validThemeColour(data.line)
+        && validThemeColour(data.surface) && validThemeColour(data.muted)
+        && validThemeColour(data.success) && validThemeColour(data.danger);
+    }
+    function validThemeLogo(data) {
+      return data is map
+        && data.keys().hasAll(['mode','monogram','imageUrl','imageAlt'])
+        && data.keys().hasOnly(['mode','monogram','imageUrl','imageAlt'])
+        && data.mode in ['monogram','image','text']
+        && validThemeText(data.monogram, 1, 3)
+        && data.imageUrl is string && (data.imageUrl == '' || validUrl(data.imageUrl))
+        && validThemeText(data.imageAlt, 1, 120)
+        && (data.mode != 'image' || data.imageUrl != '');
+    }
+    function validThemeHeader(data) {
+      return data is map
+        && data.keys().hasAll(['brandName','navigation'])
+        && data.keys().hasOnly(['brandName','navigation'])
+        && validThemeText(data.brandName, 1, 100)
+        && data.navigation is map
+        && data.navigation.keys().hasAll(['home','shop','about','contact'])
+        && data.navigation.keys().hasOnly(['home','shop','about','contact'])
+        && validThemeText(data.navigation.home, 1, 40)
+        && validThemeText(data.navigation.shop, 1, 40)
+        && validThemeText(data.navigation.about, 1, 40)
+        && validThemeText(data.navigation.contact, 1, 40);
+    }
+    function validThemeFooter(data) {
+      return data is map
+        && data.keys().hasAll(['brandName','description','exploreHeading','accountHeading','copyrightText','navigation'])
+        && data.keys().hasOnly(['brandName','description','exploreHeading','accountHeading','copyrightText','navigation'])
+        && validThemeText(data.brandName, 1, 100)
+        && validThemeText(data.description, 1, 320)
+        && validThemeText(data.exploreHeading, 1, 60)
+        && validThemeText(data.accountHeading, 1, 60)
+        && validThemeText(data.copyrightText, 1, 160)
+        && data.navigation is map
+        && data.navigation.keys().hasAll(['shop','about','contact','account','orders','security','administrator'])
+        && data.navigation.keys().hasOnly(['shop','about','contact','account','orders','security','administrator'])
+        && validThemeText(data.navigation.shop, 1, 60)
+        && validThemeText(data.navigation.about, 1, 60)
+        && validThemeText(data.navigation.contact, 1, 60)
+        && validThemeText(data.navigation.account, 1, 60)
+        && validThemeText(data.navigation.orders, 1, 60)
+        && validThemeText(data.navigation.security, 1, 60)
+        && validThemeText(data.navigation.administrator, 1, 60);
+    }
+    function validTheme(data) {
+      return data is map
+        && data.keys().hasAll(['version','typography','palette','logo','header','footer'])
+        && data.keys().hasOnly(['version','typography','palette','logo','header','footer'])
+        && data.version == 1
+        && data.typography in ['heritage','classical','editorial']
+        && validThemePalette(data.palette) && validThemeLogo(data.logo)
+        && validThemeHeader(data.header) && validThemeFooter(data.footer);
+    }
+    function validEnquiry(data) {
+      return data.keys().hasAll(['kind','name','email','message','consent','status','createdAt'])
+        && data.keys().hasOnly(['kind','name','email','organisation','message','consent','status','createdAt','updatedAt'])
+        && data.kind in ['general','quote'] && data.name is string && data.name.size() >= 2 && data.name.size() <= 80
+        && validEmail(data.email)
+        && (!('organisation' in data) || (data.organisation is string && data.organisation.size() <= 120))
+        && data.message is string && data.message.size() >= 10 && data.message.size() <= 3000
+        && data.consent == true && data.status in ['new','in_progress','resolved'] && data.createdAt is timestamp
+        && validOptionalTimestamp(data, 'updatedAt');
+    }
+    function validSubscriber(data) {
+      return data.keys().hasAll(['email','consent','source','status','createdAt'])
+        && data.keys().hasOnly(['email','emailHash','consent','source','status','createdAt','requestedAt','confirmedAt','unsubscribedAt','updatedAt','confirmTokenHash','unsubscribeTokenHash'])
+        && validEmail(data.email)
+        && (!('emailHash' in data) || (data.emailHash is string && data.emailHash.matches('^[a-f0-9]{64}$')))
+        && data.consent == true
+        && data.source in ['home','footer','checkout','contact','account_registration','account_settings']
+        && data.status in ['pending','subscribed','unsubscribed']
+        && data.createdAt is timestamp
+        && validOptionalTimestamp(data, 'requestedAt')
+        && validOptionalTimestamp(data, 'confirmedAt')
+        && validOptionalTimestamp(data, 'unsubscribedAt')
+        && validOptionalTimestamp(data, 'updatedAt')
+        && (!('confirmTokenHash' in data) || data.confirmTokenHash == null || (data.confirmTokenHash is string && data.confirmTokenHash.matches('^[a-f0-9]{64}$')))
+        && (!('unsubscribeTokenHash' in data) || data.unsubscribeTokenHash == null || (data.unsubscribeTokenHash is string && data.unsubscribeTokenHash.matches('^[a-f0-9]{64}$')));
+    }
+    // Newsletter consent evidence (newsletterConsentEvents) and token records
+    // (_newsletterTokens) are server-owned, so the match blocks below deny every
+    // client outright. This validator documents the evidence schema the trusted
+    // Functions write — {subscriberId, action, optional source, recordedAt,
+    // expiresAt, writtenBy:'server'} — and stays unreferenced on purpose.
+    function validConsentEvent(data) {
+      return data.keys().hasAll(['subscriberId','action','recordedAt','expiresAt','writtenBy'])
+        && data.keys().hasOnly(['subscriberId','action','source','recordedAt','expiresAt','writtenBy'])
+        && data.subscriberId is string && data.subscriberId.matches('^[a-f0-9]{64}$')
+        && data.action in ['requested','confirmed','unsubscribed']
+        && (!('source' in data) || data.source in ['home','footer','checkout','contact','account_registration','account_settings'])
+        && data.recordedAt is timestamp && data.expiresAt is timestamp
+        && data.writtenBy == 'server';
+    }
+    match /products/{productId} {
+      allow get: if resource.data.status == 'published' || isAdmin();
+      allow list: if isAdmin() || resource.data.status == 'published';
+      allow create, update: if isAdmin() && validProduct(request.resource.data);
+      allow delete: if isAdmin();
+    }
+    match /usersPrivate/{userId} {
+      allow read: if (owner(userId) && accountEnabled(userId)) || isAdmin();
+      // Profile fields are mutable through the rate-limited server callable
+      // only; direct client writes (including the email address) are denied so
+      // no client can bypass server-side validation or synchronisation.
+      allow create, update, delete: if false;
+    }
+    match /accountControls/{userId} {
+      allow read: if owner(userId) || isAdmin();
+      // Control records are written for *other* accounts only: no session may
+      // change its own block state, and owners are protected entirely.
+      allow create, update: if isAdmin() && request.auth.uid != userId && !isOwner(userId) && validAccountControl(request.resource.data) && keepsTombstone();
+      allow delete: if false; // Tombstones are server-owned and must never be removed.
+    }
+    match /accountRoles/{userId} {
+      allow read: if isAdmin();
+      allow write: if false; // Server-owned roles; provisioned by trusted operator tooling only.
+    }
+    match /pageContent/{pageId} {
+      allow get: if resource.data.status == 'published' || isAdmin();
+      allow list: if isAdmin() || resource.data.status == 'published';
+      // Legacy public projection. The atomic website publisher is the sole
+      // writer, preventing direct edits from diverging from version history.
+      allow create, update, delete: if false;
+    }
+    match /siteSettings/{settingsId} {
+      allow get: if resource.data.status == 'published' || isAdmin();
+      allow list: if isAdmin() || resource.data.status == 'published';
+      // Legacy public projection. Written only by publishWebsiteContent.
+      allow create, update, delete: if false;
+    }
+    match /websiteContent/{documentId} {
+      allow get: if documentId == 'published';
+      allow list, create, update, delete: if false;
+    }
+    match /websiteContentDrafts/{documentId} {
+      allow read, write: if false; // Callable editor API only.
+    }
+    match /websiteContentVersions/{documentId} {
+      allow read, write: if false; // Callable editor API only.
+    }
+    match /websiteMediaLocks/{documentId} {
+      allow read, write: if false; // Trusted reference/deletion coordination.
+    }
+    match /enquiries/{enquiryId} {
+      allow read, delete: if isAdmin();
+      allow create: if false; // Trusted callable function only.
+      allow update: if isAdmin() && validEnquiry(request.resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt']);
+    }
+    match /newsletterSubscribers/{subscriberId} {
+      allow read, delete: if isAdmin();
+      allow create: if false; // Trusted callable function only.
+      allow update: if isAdmin() && validSubscriber(request.resource.data) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt']);
+    }
+    // Consent tokens and consent evidence are server-only: a client can present
+    // a token to a callable, but can never read, forge or rewrite the records.
+    match /_newsletterTokens/{tokenHash} {
+      allow read, write: if false;
+    }
+    match /newsletterConsentEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false; // Append-only server evidence.
+    }
+    match /orders/{orderId} {
+      allow read: if (signedIn() && resource.data.userId == request.auth.uid && accountEnabled(request.auth.uid)) || isAdmin();
+      // Payment state, immutable totals, stock reservations and fulfilment are
+      // all changed through trusted Admin SDK Functions only.
+      allow create, update, delete: if false;
+    }
+    match /commerceConfig/{configId} {
+      allow read, write: if false; // Trusted payment Functions only.
+    }
+    match /_stripeEvents/{eventId} {
+      allow read, write: if false; // Idempotency records are server-only.
+    }
+    match /_stripeQuarantine/{eventId} {
+      allow read, write: if false; // Mismatched payment bindings are server-only.
+    }
+    match /_stockLedger/{entryId} {
+      allow read, write: if false; // Append-only stock bookkeeping is server-only.
+    }
+    match /_abuseCounters/{counterId} {
+      allow read, write: if false; // Server-maintained throttling state only.
+    }
+    match /accountSecurity/{userId} {
+      allow read, write: if false; // Trusted security-policy Functions only.
+      match /{document=**} { allow read, write: if false; }
+    }
+    match /accountActivity/{userId} {
+      allow read, write: if false;
+      match /activityEvents/{eventId} {
+        allow read: if owner(userId) && accountEnabled(userId);
+        allow create, update, delete: if false; // Trusted audit Functions only.
+      }
+    }
+    match /_securityChallenges/{challengeId} {
+      allow read, write: if false; // Future hashed, expiring challenges are server-only.
+    }
+    match /articles/{articleId} {
+      allow get: if resource.data.status == 'published' || isAdmin();
+      allow list: if isAdmin() || resource.data.status == 'published';
+      // Drafts, publication transitions and release-email side effects are a
+      // single trusted server workflow. No browser may bypass it.
+      allow create, update, delete: if false;
+    }
+    match /communitySurveys/{surveyId} {
+      allow get, list: if isAdmin()
+        || (signedIn() && accountEnabled(request.auth.uid) && resource.data.status in ['published','closed']);
+      // Definitions, publishing state and response counters are server-owned.
+      allow create, update, delete: if false;
+      match /responses/{responseId} {
+        allow get: if isAdmin() || (owner(responseId) && accountEnabled(responseId));
+        allow list: if isAdmin();
+        // Answer validation, identity snapshots and count increments are atomic
+        // in submitCommunityResponse; no browser may bypass that boundary.
+        allow create, update, delete: if false;
+      }
+    }
+    match /analyticsEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false; // Trusted, App-Check-protected Function only.
+    }
+    // The Treasury catalogue is served through a callable that removes reveal
+    // content for cards the caller has not collected. Direct catalogue reads
+    // would bypass that projection, so definitions and codes remain server-only.
+    match /treasuryEditions/{editionId} {
+      allow read, write: if false;
+    }
+    match /treasuryCards/{cardId} {
+      allow read, write: if false;
+    }
+    match /_treasuryCodeBatches/{batchId} {
+      allow read, write: if false;
+    }
+    match /_treasuryCodes/{codeHash} {
+      allow read, write: if false;
+    }
+    match /_treasuryRedemptions/{redemptionId} {
+      allow read, write: if false;
+    }
+    match /userTreasuries/{userId} {
+      allow read: if owner(userId) && accountEnabled(userId);
+      allow write: if false;
+      match /cards/{cardId} {
+        allow read: if owner(userId) && accountEnabled(userId);
+        allow create, update, delete: if false;
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

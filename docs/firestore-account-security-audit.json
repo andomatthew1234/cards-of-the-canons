@@ -1,0 +1,13 @@
+{
+  "score": 5,
+  "scope": "New accountSecurity and _securityChallenges paths introduced for the Account Security Centre",
+  "summary": "Both paths are denied to every client, including owners and administrators. Sanitised policy data is returned only by an authenticated, App Check-protected callable, and no challenge secret or hash is returned. The broader existing Firestore rules remain unchanged apart from these default-deny additions.",
+  "findings": [],
+  "regressionTests": [
+    "Unauthenticated clients cannot read or write account security policy documents",
+    "Account owners cannot read or write their account security policy documents directly",
+    "Administrators cannot bypass the server-owned policy boundary",
+    "No client can read or write future security challenge documents",
+    "Unknown document paths remain default-deny"
+  ]
+}

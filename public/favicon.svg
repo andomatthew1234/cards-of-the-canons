@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Doxa">
+  <rect width="64" height="64" rx="14" fill="#2c211b"/>
+  <path d="M32 9c12 0 21 9 21 22 0 14-8 24-21 24S11 45 11 31C11 18 20 9 32 9Z" fill="none" stroke="#c79a45" stroke-width="3"/>
+  <text x="32" y="41" text-anchor="middle" font-family="Georgia,serif" font-size="28" fill="#f8f4eb">D</text>
+</svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 920" role="img" aria-labelledby="title desc">
+  <title id="title">Individual card pack</title><desc id="desc">A warm cream foil pack containing one random Doxa card.</desc>
+  <rect width="800" height="920" fill="#eee2cb"/><rect x="116" y="76" width="568" height="770" rx="18" fill="#493426"/>
+  <path d="M116 180h568M116 738h568" stroke="#c69c4c" stroke-width="4"/><rect x="145" y="105" width="510" height="712" rx="9" fill="none" stroke="#d9bc79" stroke-width="2"/>
+  <text x="400" y="345" text-anchor="middle" fill="#d9b66d" font-family="Georgia,serif" font-size="74">DOXA</text>
+  <circle cx="400" cy="485" r="97" fill="none" stroke="#d9bc79" stroke-width="3"/><path d="M360 535V434l40-35 40 35v101M342 535h116" fill="none" stroke="#d9bc79" stroke-width="9" stroke-linecap="round"/>
+  <text x="400" y="660" text-anchor="middle" fill="#f8f0df" font-family="Arial,sans-serif" font-size="24" letter-spacing="5">ONE RANDOM CARD</text>
+</svg>
