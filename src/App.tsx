@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { createBrowserRouter, Navigate, Route, RouterProvider, Routes, useLocation } from 'react-router-dom'
+import { UnsavedChangesProvider } from './admin/UnsavedChanges'
 import { Layout } from './components/Layout'
 import { AccountCentreShell } from './components/account/AccountChrome'
 import { AuthProvider, useAuth } from './context/AuthContext'
@@ -135,6 +136,12 @@ function AppRoutes() {
   return pathname.startsWith('/admin') ? routes : <Layout>{routes}</Layout>
 }
 
+function ApplicationShell() {
+  return <AuthProvider><SiteContentProvider><CatalogProvider><CartProvider><UnsavedChangesProvider><ScrollToTop /><AppRoutes /></UnsavedChangesProvider></CartProvider></CatalogProvider></SiteContentProvider></AuthProvider>
+}
+
+const router = createBrowserRouter([{ path: '*', element: <ApplicationShell /> }])
+
 export default function App() {
-  return <BrowserRouter><AuthProvider><SiteContentProvider><CatalogProvider><CartProvider><ScrollToTop /><AppRoutes /></CartProvider></CatalogProvider></SiteContentProvider></AuthProvider></BrowserRouter>
+  return <RouterProvider router={router} />
 }

@@ -1,4 +1,4 @@
-import type { Order, Product } from '../types'
+import type { Article, Order, Product } from '../types'
 import { replaceLegacyBrand } from '../lib/brand'
 
 export const demoProducts: Product[] = [
@@ -78,3 +78,22 @@ export function normaliseProductCopy(product: Product): Product {
 }
 
 export const demoOrders: Order[] = []
+
+export const demoJournalArticles: Article[] = [
+  {
+    id: 'starter-building-doxa', revision: 0, slug: 'building-the-doxa-treasury', title: 'Building the Doxa Treasury',
+    excerpt: 'A first look at the ideas shaping Doxa: beautiful objects, carefully told stories and a collection designed to be revisited.',
+    category: 'Progress update', coverImageUrl: '/images/history/hosios-loukas.jpg',
+    coverImageAlt: 'The Byzantine monastery of Hosios Loukas beneath the mountains of Boeotia', authorName: 'Doxa Treasury',
+    seoTitle: '', seoDescription: '', featured: true, status: 'published', publishedAt: '2026-10-01T00:00:00.000Z',
+    bodyMarkdown: 'Doxa began with a simple hope: to make the beauty and history of the Church easier to encounter, hold and share. The collection is being shaped around stories worth returning to, with artwork and physical details that invite a closer look.\n\nWe are currently refining the first cards, their presentation and the wider collecting experience. That work includes the Treasury, where collectors will be able to record the cards they own and see their collection grow over time.\n\nThis Journal will hold progress notes, stories behind the collection and longer explorations of the people, places and moments that inspire Doxa. More will be shared as the first release takes shape.',
+  },
+  {
+    id: 'starter-history-hands', revision: 0, slug: 'why-history-belongs-in-your-hands', title: 'Why history belongs in your hands',
+    excerpt: 'The thinking behind a tactile collection—and why a physical object can make a story feel newly present.',
+    category: 'From the studio', coverImageUrl: '/images/editorial/doxa-candle-vigil.webp',
+    coverImageAlt: 'Beeswax prayer candles glowing inside an Orthodox Church', authorName: 'Doxa Treasury',
+    seoTitle: '', seoDescription: '', featured: false, status: 'published', publishedAt: '2026-10-01T00:00:00.000Z',
+    bodyMarkdown: 'History can feel distant when it is reduced to dates on a page. A thoughtfully made card creates a different kind of encounter: an image to study, a story to remember and an object that can be shared with somebody else.\n\nThat is why Doxa is being designed as more than a checklist. Each card belongs to a wider treasury of people, places and turning points, with room for a collector to make connections across the life of the Church.\n\nThe physical collection and the online Treasury are intended to work together. The card remains the heart of the experience; the account simply helps collectors recognise what they hold and discover what remains.',
+  },
+]

@@ -5,9 +5,9 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AccountCentreShell } from '../../components/account/AccountChrome'
-import { AccountPanel, AccountSettingRow, AccountStatus, AccountTextLink } from '../../components/account/AccountCentreUI'
+import { AccountPanel, AccountRequestError, AccountSettingRow, AccountStatus, AccountTextLink } from '../../components/account/AccountCentreUI'
 import { formatMoney } from '../../config'
-import { useAuth } from '../../context/AuthContext'
+import { friendlyAuthError, useAuth } from '../../context/AuthContext'
 import { getAccountSecurityPolicy, getUserProfile } from '../../lib/accounts'
 import { authenticatorFactorId } from '../../lib/authenticatorMfa'
 import { getCommunityAttentionCount } from '../../lib/community'
@@ -37,28 +37,39 @@ function useAccountSummary() {
   const [policy, setPolicy] = useState(initialPolicy)
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
+  const [errors, setErrors] = useState<Partial<Record<'profile' | 'policy' | 'orders', string>>>({})
+  const [requestVersion, setRequestVersion] = useState(0)
   useEffect(() => {
-    if (!auth.user) return
+    if (!auth.user) { setLoading(false); return }
     let active = true
+    setLoading(true)
+    setErrors({})
     Promise.allSettled([getUserProfile(auth.user.uid), getAccountSecurityPolicy(), listOrdersForUser(auth.user.uid)]).then(([profileResult, policyResult, ordersResult]) => {
       if (!active) return
       if (profileResult.status === 'fulfilled') setProfile(profileResult.value)
       if (policyResult.status === 'fulfilled') setPolicy(policyResult.value.policy)
       if (ordersResult.status === 'fulfilled') setOrders(ordersResult.value)
+      setErrors({
+        ...(profileResult.status === 'rejected' ? { profile: friendlyAuthError(profileResult.reason) } : {}),
+        ...(policyResult.status === 'rejected' ? { policy: friendlyAuthError(policyResult.reason) } : {}),
+        ...(ordersResult.status === 'rejected' ? { orders: friendlyAuthError(ordersResult.reason) } : {}),
+      })
       setLoading(false)
     })
     return () => { active = false }
-  }, [auth.user])
-  return { profile, policy, orders, loading }
+  }, [auth.user, requestVersion])
+  return { profile, policy, orders, loading, errors, retry: () => setRequestVersion((current) => current + 1) }
 }
 
 export function AccountOverview() {
   const auth = useAuth()
-  const { profile, policy, orders, loading } = useAccountSummary()
+  const { profile, policy, orders, loading, errors, retry } = useAccountSummary()
   const [communityAttention, setCommunityAttention] = useState(0)
   const [mailingList, setMailingList] = useState<AccountMailingListStatus | null>(null)
   const [mailingBusy, setMailingBusy] = useState(false)
   const [mailingFeedback, setMailingFeedback] = useState('')
+  const [overviewErrors, setOverviewErrors] = useState<Partial<Record<'community' | 'mailing', string>>>({})
+  const [overviewRequestVersion, setOverviewRequestVersion] = useState(0)
   const authenticatorEnabled = auth.mfaFactors.some((factor) => factor.factorId === authenticatorFactorId)
   const needsAttention = !auth.user?.emailVerified || !authenticatorEnabled
   const name = profile?.displayName || auth.user?.displayName || 'Collector'
@@ -68,13 +79,18 @@ export function AccountOverview() {
   useEffect(() => {
     if (!auth.user) return
     let active = true
+    setOverviewErrors({})
     void Promise.allSettled([getCommunityAttentionCount(auth.user.uid), getMyMailingListStatus()]).then(([communityResult, mailingResult]) => {
       if (!active) return
       if (communityResult.status === 'fulfilled') setCommunityAttention(communityResult.value)
       if (mailingResult.status === 'fulfilled') setMailingList(mailingResult.value)
+      setOverviewErrors({
+        ...(communityResult.status === 'rejected' ? { community: friendlyAuthError(communityResult.reason) } : {}),
+        ...(mailingResult.status === 'rejected' ? { mailing: friendlyAuthError(mailingResult.reason) } : {}),
+      })
     })
     return () => { active = false }
-  }, [auth.user])
+  }, [auth.user, overviewRequestVersion])
 
   async function updateMailingList(enabled: boolean) {
     setMailingBusy(true)
@@ -91,24 +107,27 @@ export function AccountOverview() {
   }
 
   return <AccountCentreShell title={`Welcome, ${name.split(' ')[0]}`} eyebrow="Overview" description="A clear view of your account, recent purchases and community activity.">
+    {errors.profile && <AccountRequestError message={errors.profile} onRetry={retry} />}
     <div className="account-overview-dashboard" aria-busy={loading}>
       <AccountPanel title="Orders & purchases" description="Your most recent purchase activity." className="account-summary-panel account-overview-orders">
-        {orders[0] ? <div className="account-overview-order-tile"><Package aria-hidden="true" /><div><strong>Order #{orders[0].id}</strong><p>{orders[0].items.length} item line{orders[0].items.length === 1 ? '' : 's'}</p></div><span>{formatMoney(orders[0].totalCents, orders[0].currency)}</span></div> : <div className="account-overview-empty"><ShoppingBag aria-hidden="true" /><p>No purchases yet.</p></div>}
+        {errors.orders ? <AccountRequestError message={errors.orders} onRetry={retry} /> : orders[0] ? <div className="account-overview-order-tile"><Package aria-hidden="true" /><div><strong>Order #{orders[0].id}</strong><p>{orders[0].items.length} item line{orders[0].items.length === 1 ? '' : 's'}</p></div><span>{formatMoney(orders[0].totalCents, orders[0].currency)}</span></div> : <div className="account-overview-empty"><ShoppingBag aria-hidden="true" /><p>No purchases yet.</p></div>}
         <AccountTextLink to="/account/orders">View orders & purchases</AccountTextLink>
       </AccountPanel>
 
       <AccountPanel title="Community" description="New polls and surveys shared with account members." className="account-summary-panel account-overview-community">
-        <div className="account-overview-community-count"><MessagesSquare aria-hidden="true" /><div><strong>{communityAttention}</strong><p>{communityAttention === 1 ? 'survey waiting for you' : communityAttention > 1 ? 'surveys waiting for you' : 'new surveys waiting'}</p></div>{communityAttention > 0 && <AccountStatus tone="warning">New</AccountStatus>}</div>
+        {overviewErrors.community ? <AccountRequestError message={overviewErrors.community} onRetry={() => setOverviewRequestVersion((current) => current + 1)} /> : <div className="account-overview-community-count"><MessagesSquare aria-hidden="true" /><div><strong>{communityAttention}</strong><p>{communityAttention === 1 ? 'survey waiting for you' : communityAttention > 1 ? 'surveys waiting for you' : 'new surveys waiting'}</p></div>{communityAttention > 0 && <AccountStatus tone="warning">New</AccountStatus>}</div>}
         <AccountTextLink to="/account/community">Open Community</AccountTextLink>
       </AccountPanel>
 
       <AccountPanel title="Mailing list" description="Choose whether to receive occasional collection news and updates." className="account-summary-panel account-overview-mailing">
-        <label className="account-overview-mailing-toggle"><span><strong>Mailing-list updates</strong><small>{mailingEnabled ? mailingList?.status === 'pending' ? 'Preference saved; email verification required.' : `On for ${maskEmail(mailingList?.email || auth.user?.email)}` : 'Currently turned off.'}</small></span><input type="checkbox" role="switch" aria-label="Receive mailing-list updates" checked={mailingEnabled} disabled={mailingBusy || mailingList === null} onChange={(event) => void updateMailingList(event.target.checked)} /><i aria-hidden="true" /></label>
+        {overviewErrors.mailing && <AccountRequestError message={overviewErrors.mailing} onRetry={() => setOverviewRequestVersion((current) => current + 1)} />}
+        {!overviewErrors.mailing && <label className="account-overview-mailing-toggle"><span><strong>Mailing-list updates</strong><small>{mailingEnabled ? mailingList?.status === 'pending' ? 'Preference saved; email verification required.' : `On for ${maskEmail(mailingList?.email || auth.user?.email)}` : 'Currently turned off.'}</small></span><input type="checkbox" role="switch" aria-label="Receive mailing-list updates" checked={mailingEnabled} disabled={mailingBusy || mailingList === null} onChange={(event) => void updateMailingList(event.target.checked)} /><i aria-hidden="true" /></label>}
         {mailingFeedback && <p className="account-overview-mailing-feedback" role="status">{mailingFeedback}</p>}
         <AccountTextLink to="/account/mailing-list">Manage mailing list</AccountTextLink>
       </AccountPanel>
 
       <AccountPanel title="Security checkup" description={needsAttention ? 'One or more account protections need your attention.' : 'Your key account protections are in place.'} className="account-summary-panel account-overview-security">
+        {errors.policy && <AccountRequestError message={errors.policy} onRetry={retry} />}
         <div className="account-checkup-heading"><span className={`account-checkup-icon ${needsAttention ? 'warning' : 'positive'}`}><ShieldCheck aria-hidden="true" /></span><div><strong>{needsAttention ? 'Review recommended' : 'Looking good'}</strong><p>{needsAttention ? (!auth.user?.emailVerified ? 'Verify your email to protect recovery and future account changes.' : 'Add an authenticator for stronger sign-in protection.') : 'Your email and additional sign-in protection are configured.'}</p></div><AccountStatus tone={needsAttention ? 'warning' : 'positive'}>{needsAttention ? 'Action available' : 'Protected'}</AccountStatus></div>
         <dl className="account-checkup-list"><div><dt><Laptop aria-hidden="true" /> Recent account activity</dt><dd>{friendlyDate(auth.user?.metadata.lastSignInTime)}</dd></div><div><dt><LockKeyhole aria-hidden="true" /> Current login method</dt><dd>{providerLabel}</dd></div><div><dt><Mail aria-hidden="true" /> Account email</dt><dd>{auth.user?.emailVerified ? 'Verified' : 'Not verified'}</dd></div><div><dt><ShieldCheck aria-hidden="true" /> Additional protection</dt><dd>{authenticatorEnabled ? 'Authenticator enabled' : policy.methods.emailCode.status === 'enabled' ? 'Email code enabled' : 'Not configured'}</dd></div></dl>
         <AccountTextLink to="/account/security">Open security checkup</AccountTextLink>
@@ -121,15 +140,22 @@ export function AccountOrdersPage() {
   const auth = useAuth()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [requestVersion, setRequestVersion] = useState(0)
   useEffect(() => {
-    if (!auth.user) return
+    if (!auth.user) { setLoading(false); return }
     let active = true
-    void listOrdersForUser(auth.user.uid).then((items) => { if (active) setOrders(items) }).finally(() => { if (active) setLoading(false) })
+    setLoading(true)
+    setError('')
+    void listOrdersForUser(auth.user.uid)
+      .then((items) => { if (active) setOrders(items) })
+      .catch((requestError) => { if (active) setError(friendlyAuthError(requestError)) })
+      .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [auth.user])
+  }, [auth.user, requestVersion])
   return <AccountCentreShell title="Orders & purchases" eyebrow="Purchase history" description="Review purchases connected to your customer account.">
     <AccountPanel title="Order history" description="Test purchases are clearly separated from future live orders.">
-      {loading ? <p className="account-panel-empty" role="status">Loading your orders…</p> : orders.length ? <div className="account-order-list-v2">{orders.map((order) => <article key={order.id}><span className="account-setting-icon"><ShoppingBag aria-hidden="true" /></span><div><strong>Order #{order.id}</strong><p>{order.items.map((item) => `${item.quantity} × ${item.name}`).join(', ')}</p></div><div><AccountStatus tone={order.paymentEnvironment === 'live' ? 'positive' : 'warning'}>{order.paymentEnvironment === 'live' ? 'Live order' : 'Test order'}</AccountStatus><strong>{formatMoney(order.totalCents, order.currency)}</strong><small>{order.status.replace('_', ' ')}</small></div></article>)}</div> : <div className="account-page-empty"><Package aria-hidden="true" /><h3>No orders yet</h3><p>Purchases made while signed in will appear here.</p><Link className="button secondary" to="/shop">Browse the collection</Link></div>}
+      {loading ? <p className="account-panel-empty" role="status">Loading your orders…</p> : error ? <AccountRequestError message={error} onRetry={() => setRequestVersion((current) => current + 1)} /> : orders.length ? <div className="account-order-list-v2">{orders.map((order) => <article key={order.id}><span className="account-setting-icon"><ShoppingBag aria-hidden="true" /></span><div><strong>Order #{order.id}</strong><p>{order.items.map((item) => `${item.quantity} × ${item.name}`).join(', ')}</p></div><div><AccountStatus tone={order.paymentEnvironment === 'live' ? 'positive' : 'warning'}>{order.paymentEnvironment === 'live' ? 'Live order' : 'Test order'}</AccountStatus><strong>{formatMoney(order.totalCents, order.currency)}</strong><small>{order.status.replace('_', ' ')}</small></div></article>)}</div> : <div className="account-page-empty"><Package aria-hidden="true" /><h3>No orders yet</h3><p>Purchases made while signed in will appear here.</p><Link className="button secondary" to="/shop">Browse the collection</Link></div>}
     </AccountPanel>
   </AccountCentreShell>
 }

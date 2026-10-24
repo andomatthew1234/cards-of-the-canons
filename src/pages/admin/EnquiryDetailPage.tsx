@@ -1,7 +1,7 @@
 import { ArrowLeft, Mail, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AdminPageHeader, AdminPanel, ConfirmDialog, EmptyState, LoadingState, StatusBadge } from '../../admin/components'
+import { AdminPageHeader, AdminPanel, ConfirmDialog, EmptyState, ErrorState, LoadingState, StatusBadge } from '../../admin/components'
 import { useAdminData } from '../../admin/AdminContext'
 import { formatAdminDate } from '../../admin/utils'
 import { PageMeta } from '../../components/PageMeta'
@@ -11,9 +11,10 @@ import type { Enquiry } from '../../types'
 export function EnquiryDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { enquiries, loading, busy, runAction } = useAdminData()
+  const { enquiries, loading, errors, busy, runAction, refresh } = useAdminData()
   const [deleteOpen, setDeleteOpen] = useState(false)
   if (loading) return <LoadingState label="Loading enquiry…" />
+  if (errors.enquiries) return <ErrorState message={errors.enquiries} onRetry={() => void refresh()} />
   const enquiry = enquiries.find((item) => item.id === id)
   if (!enquiry || !enquiry.id) return <EmptyState title="Enquiry not found" description="It may have been deleted or the link is invalid." action={<Link className="button secondary" to="/admin/enquiries"><ArrowLeft /> Back to enquiries</Link>} />
   const remove = async () => {

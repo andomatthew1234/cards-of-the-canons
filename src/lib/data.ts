@@ -1,9 +1,9 @@
-import { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore'
+import { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { adminFunctionsAvailable, checkoutMode, isFirebaseMode } from '../config'
-import { demoOrders, demoProducts, normaliseProductCopy } from '../data/demo'
-import type { AccountMailingListStatus, Article, EmailCampaign, EmailCampaignDraft, EmailCampaignWorkspace, Enquiry, NewsletterAdminOverview, NewsletterCampaignDraft, NewsletterSignupResult, NewsletterSource, NewsletterSubscriber, Order, PageContent, Product, SiteSettings } from '../types'
+import { demoJournalArticles, demoOrders, demoProducts, normaliseProductCopy } from '../data/demo'
+import type { AccountMailingListStatus, Article, EmailCampaign, EmailCampaignAudiencePage, EmailCampaignDraft, EmailCampaignPurpose, EmailCampaignWorkspace, Enquiry, NewsletterAdminOverview, NewsletterCampaignDraft, NewsletterSignupResult, NewsletterSource, NewsletterSubscriber, Order, PageContent, Product, SiteSettings } from '../types'
 import { getFirebaseServices } from './firebase'
 
 export const dataMode = isFirebaseMode ? 'firebase' : 'demo'
@@ -15,17 +15,62 @@ export async function listPublishedProducts(): Promise<Product[]> {
   return snap.docs.map((item) => normaliseProductCopy({ id: item.id, ...item.data() } as Product))
 }
 
-export async function listPublishedJournalArticles(): Promise<Article[]> {
-  if (!isFirebaseMode) return []
-  const { db } = getFirebaseServices()
-  const snap = await getDocs(query(collection(db, 'articles'), where('status', '==', 'published'), orderBy('publishedAt', 'desc'), limit(100)))
-  return snap.docs.map((item) => ({ id: item.id, ...item.data() } as Article))
+export interface JournalArticlePage {
+  articles: Article[]
+  nextCursor: string | null
 }
 
-export async function listJournalArticlesAdmin(): Promise<Article[]> {
-  if (!isFirebaseMode) return []
+export interface JournalAdminPage extends JournalArticlePage {
+  counts: { draft: number; published: number }
+}
+
+const JOURNAL_PAGE_SIZE = 12
+
+export async function listPublishedJournalArticles(cursor?: string | null, pageSize = JOURNAL_PAGE_SIZE): Promise<JournalArticlePage> {
+  if (!isFirebaseMode) return { articles: cursor ? [] : demoJournalArticles, nextCursor: null }
+  const { db } = getFirebaseServices()
+  const boundedPageSize = Math.max(1, Math.min(24, Math.trunc(pageSize)))
+  const base = [where('status', '==', 'published'), orderBy('publishedAt', 'desc')]
+  let pageQuery
+  if (cursor) {
+    const cursorSnapshot = await getDoc(doc(db, 'articles', cursor))
+    if (!cursorSnapshot.exists() || cursorSnapshot.data().status !== 'published') throw new Error('This Journal page changed. Refresh the archive and try again.')
+    pageQuery = query(collection(db, 'articles'), ...base, startAfter(cursorSnapshot), limit(boundedPageSize + 1))
+  } else {
+    pageQuery = query(collection(db, 'articles'), ...base, limit(boundedPageSize + 1))
+  }
+  const snap = await getDocs(pageQuery)
+  const visible = snap.docs.slice(0, boundedPageSize)
+  return {
+    articles: visible.map((item) => ({ id: item.id, ...item.data() } as Article)),
+    nextCursor: snap.docs.length > boundedPageSize ? visible.at(-1)?.id ?? null : null,
+  }
+}
+
+export async function getPublishedJournalArticle(slug: string): Promise<Article | null> {
+  if (!isFirebaseMode) return demoJournalArticles.find((article) => article.slug === slug) ?? null
+  const { db } = getFirebaseServices()
+  const snap = await getDocs(query(collection(db, 'articles'), where('status', '==', 'published'), where('slug', '==', slug), limit(1)))
+  const article = snap.docs[0]
+  return article ? { id: article.id, ...article.data() } as Article : null
+}
+
+export async function listJournalArticlesAdminPage(cursor?: string | null, pageSize = 30): Promise<JournalAdminPage> {
+  if (!isFirebaseMode) return { articles: [], nextCursor: null, counts: { draft: 0, published: 0 } }
   const { functions } = getFirebaseServices()
-  return (await httpsCallable<Record<string, never>, { articles: Article[] }>(functions, 'listJournalArticlesAdmin')({})).data.articles
+  const payload = { ...(cursor ? { cursor } : {}), pageSize }
+  return (await httpsCallable<typeof payload, JournalAdminPage>(functions, 'listJournalArticlesAdmin')(payload)).data
+}
+
+/** @deprecated Prefer the paginated admin API. */
+export async function listJournalArticlesAdmin(): Promise<Article[]> {
+  return (await listJournalArticlesAdminPage()).articles
+}
+
+export async function getJournalArticleAdmin(articleId: string): Promise<Article | null> {
+  if (!isFirebaseMode) return null
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<{ articleId: string }, { article: Article | null }>(functions, 'getJournalArticleAdmin')({ articleId })).data.article
 }
 
 export type JournalArticleDraft = Omit<Article, 'id' | 'status' | 'createdAt' | 'updatedAt' | 'publishedAt' | 'notificationStatus' | 'notificationAudienceCount' | 'notificationError'> & {
@@ -265,6 +310,11 @@ export async function suppressNewsletterSubscriber(subscriberId: string) {
 export async function listEmailCampaignWorkspace(): Promise<EmailCampaignWorkspace> {
   const { functions } = getFirebaseServices()
   return (await httpsCallable<Record<string, never>, EmailCampaignWorkspace>(functions, 'listEmailCampaignWorkspace')({})).data
+}
+
+export async function searchEmailCampaignAudience(input: { query: string; purpose: EmailCampaignPurpose; cursor?: string; pageSize?: number }): Promise<EmailCampaignAudiencePage> {
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<typeof input, EmailCampaignAudiencePage>(functions, 'searchEmailCampaignAudience')(input)).data
 }
 
 export async function saveEmailCampaign(draft: EmailCampaignDraft): Promise<EmailCampaign> {

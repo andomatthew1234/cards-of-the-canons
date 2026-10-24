@@ -1,13 +1,14 @@
 import { Bold, Code2, Eye, Heading2, ImagePlus, Italic, Link2, List, ListOrdered, Quote, Save, Send, Table2, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AdminPageHeader, AdminPanel, ConfirmDialog, EmptyState, Field, LoadingState, StatusBadge } from '../../admin/components'
+import { AdminPageHeader, AdminPanel, ConfirmDialog, EmptyState, ErrorState, Field, LoadingState, StatusBadge } from '../../admin/components'
 import { useUnsavedChanges } from '../../admin/utils'
 import { MarkdownContent } from '../../components/MarkdownContent'
 import { PageMeta } from '../../components/PageMeta'
 import { ReauthenticationPanel } from '../../components/account/ReauthenticationPanel'
 import { friendlyAuthError, useAuth } from '../../context/AuthContext'
-import { deleteJournalArticle, listJournalArticlesAdmin, publishJournalArticle, retryJournalNotification, saveJournalArticle, uploadJournalImage, type JournalArticleDraft } from '../../lib/data'
+import { deleteJournalArticle, getJournalArticleAdmin, publishJournalArticle, retryJournalNotification, saveJournalArticle, uploadJournalImage, type JournalArticleDraft } from '../../lib/data'
+import { requiresRecentAuthentication } from '../../lib/recentAuthentication'
 import type { Article } from '../../types'
 
 const blank: JournalArticleDraft = { revision: 0, slug: '', title: '', excerpt: '', bodyMarkdown: '', category: 'Progress update', coverImageUrl: '', coverImageAlt: '', authorName: 'Doxa Treasury', seoTitle: '', seoDescription: '', featured: false }
@@ -17,27 +18,25 @@ const toolbar = [
   { label: 'Numbered list', icon: ListOrdered, before: '1. ', after: '' }, { label: 'Code', icon: Code2, before: '`', after: '`' }, { label: 'Table', icon: Table2, before: '| Heading | Heading |\n| --- | --- |\n| Content | Content |', after: '' },
 ]
 
-function requiresFreshAuthentication(value: unknown) {
-  if (!value || typeof value !== 'object') return false
-  const error = value as { code?: unknown; message?: unknown; details?: unknown }
-  const code = String(error.code ?? '')
-  const message = String(error.message ?? '').toLowerCase()
-  const details = error.details && typeof error.details === 'object' ? error.details as { reason?: unknown } : undefined
-  if (code === 'auth/requires-recent-login') return true
-  if (code !== 'functions/failed-precondition') return false
-  return details?.reason === 'recent-auth-required' || message.includes('recent sign-in') || message.includes('sign in again')
-}
-
 export function JournalEditorPage({ isNew = false }: { isNew?: boolean }) {
   const { id } = useParams(); const navigate = useNavigate(); const auth = useAuth(); const editorRef = useRef<HTMLTextAreaElement>(null)
   const publishButtonRef = useRef<HTMLButtonElement>(null); const reauthModalRef = useRef<HTMLElement>(null); const publishingRef = useRef(false); const reauthLockedRef = useRef(false)
   const [article, setArticle] = useState<JournalArticleDraft>({ ...blank }); const [baseline, setBaseline] = useState(JSON.stringify(blank))
   const articleRef = useRef<JournalArticleDraft>(article); articleRef.current = article
-  const [loading, setLoading] = useState(!isNew); const [missing, setMissing] = useState(false); const [busy, setBusy] = useState(''); const [error, setError] = useState('')
-  const [preview, setPreview] = useState(false); const [publishOpen, setPublishOpen] = useState(false); const [reauthOpen, setReauthOpen] = useState(false); const [reauthBusy, setReauthBusy] = useState(false); const [deleteOpen, setDeleteOpen] = useState(false); const [sendNotification, setSendNotification] = useState(true)
-  useEffect(() => { if (isNew) return; void listJournalArticlesAdmin().then((items) => { const found = items.find((item) => item.id === id); if (!found) setMissing(true); else { setArticle(found); setBaseline(JSON.stringify(found)) } }).catch((value) => setError(friendlyAuthError(value))).finally(() => setLoading(false)) }, [id, isNew])
-  const dirty = JSON.stringify(article) !== baseline; useUnsavedChanges(dirty, 'Leave the Journal editor and discard your unsaved work?')
-  reauthLockedRef.current = reauthBusy || busy === 'publish'
+  const [loading, setLoading] = useState(!isNew); const [missing, setMissing] = useState(false); const [loadError, setLoadError] = useState(''); const [requestVersion, setRequestVersion] = useState(0); const [busy, setBusy] = useState(''); const [error, setError] = useState('')
+  const [preview, setPreview] = useState(false); const [publishOpen, setPublishOpen] = useState(false); const [reauthOpen, setReauthOpen] = useState(false); const [reauthIntent, setReauthIntent] = useState<'publish' | 'retry-email' | 'delete'>('publish'); const [reauthBusy, setReauthBusy] = useState(false); const [deleteOpen, setDeleteOpen] = useState(false); const [sendNotification, setSendNotification] = useState(true)
+  useEffect(() => {
+    if (isNew || !id) return
+    let active = true
+    setLoading(true); setMissing(false); setLoadError('')
+    void getJournalArticleAdmin(id)
+      .then((found) => { if (!active) return; if (!found) setMissing(true); else { setArticle(found); setBaseline(JSON.stringify(found)) } })
+      .catch((value) => { if (active) setLoadError(friendlyAuthError(value)) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [id, isNew, requestVersion])
+  const dirty = JSON.stringify(article) !== baseline; const allowNextNavigation = useUnsavedChanges(dirty, 'Leave the Journal editor and discard your unsaved work?')
+  reauthLockedRef.current = reauthBusy || busy === 'publish' || busy === 'retry-email' || busy === 'delete'
   const closeReauthentication = () => { if (reauthLockedRef.current) return; auth.cancelMfaReauthentication(); setReauthOpen(false); setReauthBusy(false) }
   useEffect(() => {
     if (!reauthOpen) return
@@ -63,14 +62,15 @@ export function JournalEditorPage({ isNew = false }: { isNew?: boolean }) {
     const hasNewerChanges = JSON.stringify(articleRef.current) !== requestedSnapshot
     setBaseline(JSON.stringify(saved))
     setArticle(hasNewerChanges ? { ...articleRef.current, id: saved.id, revision: saved.revision, status: saved.status, notificationStatus: saved.notificationStatus, notificationError: saved.notificationError, notificationAudienceCount: saved.notificationAudienceCount } : saved)
-    if (isNew) navigate(`/admin/journal/${saved.id}`, { replace: true })
+    if (isNew) { allowNextNavigation(); navigate(`/admin/journal/${saved.id}`, { replace: true }) }
   }
   const save = async () => { if (!valid) return setError('Add a title, URL, introduction, category and story before saving.'); const requested = article; const snapshot = JSON.stringify(requested); setBusy('save'); setError(''); try { accept(await saveJournalArticle(requested), snapshot) } catch (value) { setError(friendlyAuthError(value)) } finally { setBusy('') } }
-  const publish = async () => { if (!valid || publishingRef.current) return; const requested = article; const snapshot = JSON.stringify(requested); publishingRef.current = true; setBusy('publish'); setError(''); try { const saved = await publishJournalArticle({ ...requested, sendNotification }); accept(saved, snapshot); setPublishOpen(false); setReauthOpen(false) } catch (value) { if (requiresFreshAuthentication(value)) { setPublishOpen(false); setReauthOpen(true) } else { setReauthOpen(false); setError(friendlyAuthError(value)) } } finally { publishingRef.current = false; setBusy('') } }
-  const remove = async () => { if (!article.id) return; setBusy('delete'); setError(''); try { await deleteJournalArticle(article.id, article.revision); setBaseline(JSON.stringify(article)); setDeleteOpen(false); navigate('/admin/journal', { replace: true }) } catch (value) { setError(friendlyAuthError(value)); setDeleteOpen(false) } finally { setBusy('') } }
-  const retryEmail = async () => { if (!article.id) return; const snapshot = JSON.stringify(article); setBusy('retry-email'); setError(''); try { accept(await retryJournalNotification(article.id), snapshot) } catch (value) { setError(friendlyAuthError(value)) } finally { setBusy('') } }
+  const publish = async () => { if (!valid || publishingRef.current) return; const requested = article; const snapshot = JSON.stringify(requested); publishingRef.current = true; setBusy('publish'); setError(''); try { const saved = await publishJournalArticle({ ...requested, sendNotification }); accept(saved, snapshot); setPublishOpen(false); setReauthOpen(false) } catch (value) { if (requiresRecentAuthentication(value)) { setPublishOpen(false); setReauthIntent('publish'); setReauthOpen(true) } else { setReauthOpen(false); setError(friendlyAuthError(value)) } } finally { publishingRef.current = false; setBusy('') } }
+  const remove = async () => { if (!article.id) return; setBusy('delete'); setError(''); try { await deleteJournalArticle(article.id, article.revision); setBaseline(JSON.stringify(article)); setDeleteOpen(false); setReauthOpen(false); allowNextNavigation(); navigate('/admin/journal', { replace: true }) } catch (value) { if (requiresRecentAuthentication(value)) { setDeleteOpen(false); setReauthIntent('delete'); setReauthOpen(true) } else { setError(friendlyAuthError(value)); setDeleteOpen(false); setReauthOpen(false) } } finally { setBusy('') } }
+  const retryEmail = async () => { if (!article.id) return; const snapshot = JSON.stringify(article); setBusy('retry-email'); setError(''); try { accept(await retryJournalNotification(article.id), snapshot); setReauthOpen(false) } catch (value) { if (requiresRecentAuthentication(value)) { setReauthIntent('retry-email'); setReauthOpen(true) } else { setError(friendlyAuthError(value)); setReauthOpen(false) } } finally { setBusy('') } }
   const uploadCover = async (file?: File) => { if (!file) return; setBusy('upload'); setError(''); try { update('coverImageUrl', await uploadJournalImage(article.id || article.slug, file)); if (!article.coverImageAlt) update('coverImageAlt', article.title ? `Cover image for ${article.title}` : '') } catch (value) { setError(friendlyAuthError(value)) } finally { setBusy('') } }
   if (loading) return <LoadingState label="Opening your Journal draft…" />
+  if (loadError) return <ErrorState message={loadError} onRetry={() => setRequestVersion((current) => current + 1)} />
   if (missing) return <EmptyState title="Journal entry not found" description="It may have been removed or the link is no longer valid." action={<Link className="button secondary" to="/admin/journal">Back to Journal</Link>} />
   return <div className="journal-editor-page">
     <PageMeta title={`${article.title || 'New Journal entry'} — Admin`} description="Write and publish a Doxa Journal entry." noIndex />
@@ -83,7 +83,7 @@ export function JournalEditorPage({ isNew = false }: { isNew?: boolean }) {
       <AdminPanel title="Search preview"><div className="admin-form-stack"><Field label="SEO title" hint="Optional · up to 70 characters"><input maxLength={70} value={article.seoTitle} onChange={(event) => update('seoTitle', event.target.value)} /></Field><Field label="SEO description" hint="Optional · up to 180 characters"><textarea rows={3} maxLength={180} value={article.seoDescription} onChange={(event) => update('seoDescription', event.target.value)} /></Field><label className="admin-check"><input type="checkbox" checked={article.featured} onChange={(event) => update('featured', event.target.checked)} /><span><strong>Featured story</strong><small>Prioritise this entry in Journal highlights.</small></span></label></div></AdminPanel>
       {article.id && <AdminPanel title="Danger zone"><button className="button danger-button grow" disabled={!!busy} onClick={() => setDeleteOpen(true)}><Trash2 /> {article.status === 'published' ? 'Delete published story' : 'Delete draft'}</button></AdminPanel>}</aside></div>
     <ConfirmDialog open={publishOpen} title={article.status === 'published' ? 'Publish these changes?' : 'Release this Journal story?'} description={article.status === 'published' ? 'The live story will update immediately. No second release email will be sent.' : 'The story becomes public immediately. You can also notify every confirmed mailing-list subscriber.'} confirmLabel={busy === 'publish' ? 'Publishing…' : 'Publish story'} busy={busy === 'publish'} onCancel={() => setPublishOpen(false)} onConfirm={() => void publish()} />
-    {reauthOpen && <div className="security-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeReauthentication() }}><section ref={reauthModalRef} className="security-modal journal-reauth-modal" role="dialog" aria-modal="true" aria-labelledby="journal-reauth-title"><div className="journal-reauth-modal-bar"><div><p className="eyebrow">Secure publishing</p><p>Confirm your identity to release this story.</p></div><button type="button" className="icon-button" aria-label="Cancel identity confirmation" disabled={reauthBusy || busy === 'publish'} onClick={closeReauthentication}><X aria-hidden="true" /></button></div><ReauthenticationPanel headingId="journal-reauth-title" onBusyChange={setReauthBusy} onAuthenticated={publish} /></section></div>}
+    {reauthOpen && <div className="security-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) closeReauthentication() }}><section ref={reauthModalRef} className="security-modal journal-reauth-modal" role="dialog" aria-modal="true" aria-labelledby="journal-reauth-title"><div className="journal-reauth-modal-bar"><div><p className="eyebrow">Confirm this administrator action</p><p>{reauthIntent === 'publish' ? 'Confirm your identity to release this story.' : reauthIntent === 'retry-email' ? 'Confirm your identity to retry the release email.' : 'Confirm your identity to remove this Journal entry.'}</p></div><button type="button" className="icon-button" aria-label="Cancel identity confirmation" disabled={reauthBusy || !!busy} onClick={closeReauthentication}><X aria-hidden="true" /></button></div><ReauthenticationPanel headingId="journal-reauth-title" onBusyChange={setReauthBusy} onAuthenticated={reauthIntent === 'publish' ? publish : reauthIntent === 'retry-email' ? retryEmail : remove} /></section></div>}
     <ConfirmDialog open={deleteOpen} title={article.status === 'published' ? 'Delete this published story?' : 'Delete this draft?'} description={article.status === 'published' ? 'This immediately removes the public Journal page. Links in previously sent emails will stop working, while the email delivery history is retained.' : 'This permanently removes the draft.'} confirmLabel={article.status === 'published' ? 'Delete published story' : 'Delete draft'} busy={busy === 'delete'} onCancel={() => setDeleteOpen(false)} onConfirm={() => void remove()} />
   </div>
 }

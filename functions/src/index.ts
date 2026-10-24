@@ -25,9 +25,9 @@ export {
   suppressNewsletterSubscriber,
 } from './newsletterCampaigns'
 export { publishStagedImage } from './images'
-export { deleteJournalArticle, listJournalArticlesAdmin, publishJournalArticle, retryJournalNotification, saveJournalArticle } from './journal'
+export { deleteJournalArticle, getJournalArticleAdmin, listJournalArticlesAdmin, publishJournalArticle, retryJournalNotification, saveJournalArticle } from './journal'
 export {
-  cancelScheduledEmailCampaign, deleteEmailCampaign, listEmailCampaignWorkspace,
+  cancelScheduledEmailCampaign, deleteEmailCampaign, listEmailCampaignWorkspace, searchEmailCampaignAudience,
   processScheduledEmailCampaigns, queueEmailCampaign, retryEmailCampaign,
   saveEmailCampaign, sendEmailCampaignTest,
 } from './emailCampaigns'

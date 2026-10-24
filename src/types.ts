@@ -272,8 +272,15 @@ export interface EmailQueueItem {
 export interface EmailCampaignWorkspace {
   configured: boolean
   audienceCounts: { mailingList: number; verifiedAccounts: number }
+  audienceCandidates: Array<{ email: string; label: string; subscribed: boolean; verified: boolean }>
+  audienceDirectoryComplete: boolean
   campaigns: EmailCampaign[]
   queue: EmailQueueItem[]
+}
+
+export interface EmailCampaignAudiencePage {
+  candidates: EmailCampaignWorkspace['audienceCandidates']
+  nextCursor: string | null
 }
 
 export interface OrderItemSnapshot {
@@ -327,7 +334,7 @@ export interface Article {
   seoTitle: string
   seoDescription: string
   featured: boolean
-  status: ProductStatus
+  status: 'draft' | 'published' | 'archived'
   createdAt?: string | null
   updatedAt?: string | null
   publishedAt?: string | null

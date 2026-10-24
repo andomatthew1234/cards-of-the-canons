@@ -1,7 +1,7 @@
 import { ArrowLeft, ImagePlus, Save, Trash2 } from 'lucide-react'
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AdminPageHeader, AdminPanel, ConfirmDialog, EmptyState, Field, LoadingState, StatusBadge } from '../../admin/components'
+import { AdminPageHeader, AdminPanel, ConfirmDialog, EmptyState, ErrorState, Field, LoadingState, StatusBadge } from '../../admin/components'
 import { useAdminData } from '../../admin/AdminContext'
 import { PageMeta } from '../../components/PageMeta'
 import { deleteProduct, uploadProductImage, upsertProduct } from '../../lib/data'
@@ -13,7 +13,7 @@ const blankProduct: Product = { id: '', slug: '', name: '', shortDescription: ''
 export function ProductEditorPage({ isNew = false }: { isNew?: boolean }) {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { products, loading, busy, runAction } = useAdminData()
+  const { products, loading, errors, busy, runAction, refresh } = useAdminData()
   const existing = useMemo(() => products.find((item) => item.id === id), [products, id])
   const [product, setProduct] = useState<Product>(() => ({ ...blankProduct }))
   const [baseline, setBaseline] = useState(JSON.stringify(blankProduct))
@@ -24,11 +24,12 @@ export function ProductEditorPage({ isNew = false }: { isNew?: boolean }) {
     if (next) { setProduct(next); setBaseline(JSON.stringify(next)) }
   }, [existing, isNew])
   const dirty = JSON.stringify(product) !== baseline
-  useUnsavedChanges(dirty, 'Leave the product editor and discard your unsaved changes?')
+  const allowNextNavigation = useUnsavedChanges(dirty, 'Leave the product editor and discard your unsaved changes?')
   if (loading) return <LoadingState label="Loading product…" />
+  if (errors.products) return <ErrorState message={errors.products} onRetry={() => void refresh()} />
   if (!isNew && !existing) return <EmptyState title="Product not found" description="It may have been deleted or the link is no longer valid." action={<Link className="button secondary" to="/admin/products"><ArrowLeft /> Back to products</Link>} />
   const update = <K extends keyof Product>(key: K, value: Product[K]) => setProduct((current) => ({ ...current, [key]: value }))
-  const cancel = () => { if (!dirty || window.confirm('Discard your unsaved product changes?')) navigate('/admin/products') }
+  const cancel = () => { if (!dirty || window.confirm('Discard your unsaved product changes?')) { allowNextNavigation(); navigate('/admin/products') } }
   const save = async (event: FormEvent) => {
     event.preventDefault()
     const productId = product.id || product.slug
@@ -39,11 +40,11 @@ export function ProductEditorPage({ isNew = false }: { isNew?: boolean }) {
     }
     const next = { ...product, id: productId }
     const success = await runAction('save-product', () => upsertProduct(next), isNew ? 'Product created.' : 'Product changes saved.')
-    if (success) { setProduct(next); setBaseline(JSON.stringify(next)); navigate(`/admin/products/${encodeURIComponent(productId)}`, { replace: isNew }) }
+    if (success) { setProduct(next); setBaseline(JSON.stringify(next)); if (isNew) { allowNextNavigation(); navigate(`/admin/products/${encodeURIComponent(productId)}`, { replace: true }) } }
   }
   const remove = async () => {
     const success = await runAction(`delete-product-${product.id}`, () => deleteProduct(product.id), `${product.name} was deleted.`)
-    if (success) navigate('/admin/products', { replace: true })
+    if (success) { allowNextNavigation(); navigate('/admin/products', { replace: true }) }
   }
   const upload = async (file?: File) => {
     if (!file) return

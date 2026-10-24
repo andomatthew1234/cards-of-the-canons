@@ -30,7 +30,7 @@ export function CommunityEditorPage({ isNew = false }: { isNew?: boolean }) {
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [resultOpen, setResultOpen] = useState<string | null>(null)
   const dirty = Boolean(baseline) && JSON.stringify(survey) !== baseline
-  useUnsavedChanges(dirty, 'Leave the survey editor and discard your unsaved changes?')
+  const allowNextNavigation = useUnsavedChanges(dirty, 'Leave the survey editor and discard your unsaved changes?')
 
   useEffect(() => {
     if (isNew) { const initial = { ...blankSurvey, questions: [newQuestion()] }; setSurvey(initial); setBaseline(JSON.stringify(initial)); return }
@@ -67,14 +67,14 @@ export function CommunityEditorPage({ isNew = false }: { isNew?: boolean }) {
     const input = { ...(survey.id ? { id: survey.id } : {}), title: survey.title, description: survey.description, status: survey.status, questions: survey.questions }
     const success = await runAction('save-community-survey', async () => {
       const savedId = await saveCommunitySurvey(input)
-      setSurvey((current) => ({ ...current, id: savedId })); navigate(`/admin/community/${encodeURIComponent(savedId)}`, { replace: isNew })
+      setSurvey((current) => ({ ...current, id: savedId })); if (isNew) { allowNextNavigation(); navigate(`/admin/community/${encodeURIComponent(savedId)}`, { replace: true }) }
     }, isNew ? 'Survey created.' : 'Survey changes saved.')
     if (success) setBaseline(JSON.stringify({ ...survey, id: survey.id || input.id || survey.id }))
   }
   const remove = async () => {
     if (!survey.id) return
     const success = await runAction('delete-community-survey', () => deleteCommunitySurvey(survey.id), 'Survey and its responses were deleted.')
-    if (success) navigate('/admin/community', { replace: true })
+    if (success) { allowNextNavigation(); navigate('/admin/community', { replace: true }) }
   }
   const statusCopy: Record<CommunitySurveyStatus, string> = { draft: 'Only administrators can view this survey.', published: 'Visible and accepting responses in customer accounts.', closed: 'Visible as closed; existing responses remain available.' }
   return <>

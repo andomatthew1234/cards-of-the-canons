@@ -19,6 +19,12 @@ const region = 'australia-southeast1'
 const protectedOptions = { region, enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true' }
 const providerOptions = { ...protectedOptions, secrets: [resendApiKey], timeoutSeconds: 540, memory: '512MiB' as const }
 const campaignIdSchema = z.string().regex(/^[A-Za-z0-9_-]{10,80}$/)
+const audienceSearchSchema = z.object({
+  query: z.string().trim().max(160).default(''),
+  purpose: z.enum(['marketing', 'service']),
+  cursor: z.string().email().max(320).optional(),
+  pageSize: z.number().int().min(1).max(100).default(50),
+}).strict()
 const secureUrl = z.union([z.literal(''), z.string().url().max(1000).refine((value) => value.startsWith('https://'), 'Use a secure https:// link.')])
 const colour = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Use a six-digit hex colour.')
 
@@ -201,20 +207,66 @@ function storedDraft(id: string, data: FirebaseFirestore.DocumentData): Campaign
 }
 
 async function subscribedEmails() {
-  const snapshot = await db.collection('newsletterSubscribers').where('status', '==', 'subscribed').limit(50_000).get()
+  const maximumAudienceSize = 50_000
+  const snapshot = await db.collection('newsletterSubscribers').where('status', '==', 'subscribed').limit(maximumAudienceSize + 1).get()
+  if (snapshot.size > maximumAudienceSize) {
+    throw new HttpsError('resource-exhausted', 'The mailing-list audience is too large to prepare safely in one request.')
+  }
   return snapshot.docs.map((document) => normaliseNewsletterEmail(document.data().email)).filter(Boolean)
 }
 
-async function verifiedAccountEmails() {
-  const emails: string[] = []
+interface VerifiedAccountCandidate { email: string; label: string }
+
+async function verifiedAccountDirectory() {
+  const accounts: VerifiedAccountCandidate[] = []
   let pageToken: string | undefined
   for (let page = 0; page < 50; page += 1) {
     const result = await getAuth().listUsers(1000, pageToken)
-    emails.push(...result.users.filter((user) => !user.disabled && user.emailVerified && user.email).map((user) => normaliseNewsletterEmail(user.email)))
+    accounts.push(...result.users.filter((user) => !user.disabled && user.emailVerified && user.email).map((user) => {
+      const email = normaliseNewsletterEmail(user.email)
+      return { email, label: user.displayName?.trim() ? `${user.displayName.trim()} · ${email}` : email }
+    }))
     pageToken = result.pageToken
-    if (!pageToken) return emails
+    if (!pageToken) return accounts
   }
   throw new HttpsError('resource-exhausted', 'The account audience is too large to prepare safely in one request.')
+}
+
+async function verifiedAccountEmails() {
+  return (await verifiedAccountDirectory()).map((account) => account.email)
+}
+
+export function buildAudienceCandidates(subscriberEmails: string[], accounts: VerifiedAccountCandidate[]) {
+  const candidates = new Map<string, { email: string; label: string; subscribed: boolean; verified: boolean }>()
+  subscriberEmails.forEach((rawEmail) => {
+    const email = normaliseNewsletterEmail(rawEmail)
+    if (email) candidates.set(email, { email, label: email, subscribed: true, verified: false })
+  })
+  accounts.forEach((account) => {
+    const email = normaliseNewsletterEmail(account.email)
+    if (!email) return
+    const previous = candidates.get(email)
+    candidates.set(email, { email, label: account.label || email, subscribed: previous?.subscribed ?? false, verified: true })
+  })
+  return [...candidates.values()].sort((left, right) => left.email.localeCompare(right.email))
+}
+
+export function pageAudienceCandidates(
+  candidates: ReturnType<typeof buildAudienceCandidates>,
+  input: { query: string; purpose: 'marketing' | 'service'; cursor?: string; pageSize: number },
+) {
+  const needle = input.query.toLowerCase()
+  const eligible = candidates.filter((person) => (input.purpose === 'marketing' ? person.subscribed : person.verified || person.subscribed)
+    && (!needle || person.email.includes(needle) || person.label.toLowerCase().includes(needle)))
+  const cursorIndex = input.cursor ? eligible.findIndex((person) => person.email === input.cursor) : -1
+  if (input.cursor && cursorIndex < 0) throw new HttpsError('failed-precondition', 'The audience changed. Refresh these recipients and try again.')
+  const start = cursorIndex + 1
+  const page = eligible.slice(start, start + input.pageSize + 1)
+  const visible = page.slice(0, input.pageSize)
+  return {
+    candidates: visible,
+    nextCursor: page.length > input.pageSize ? visible.at(-1)?.email ?? null : null,
+  }
 }
 
 async function resolveRecipients(campaign: CampaignDraft) {
@@ -388,26 +440,38 @@ async function reconcileQueuedBroadcasts(documents: FirebaseFirestore.QueryDocum
 
 export const listEmailCampaignWorkspace = onCall(providerOptions, async (request) => {
   await requireAdminContext(request as CallableRequestLike)
-  const [initialCampaigns, initialQueue, subscriberCount, accountEmails] = await Promise.all([
+  const [initialCampaigns, initialQueue, subscriberEmails, accountDirectory] = await Promise.all([
     db.collection('emailCampaigns').orderBy('updatedAt', 'desc').limit(100).get(),
     db.collection('emailQueue').orderBy('createdAt', 'desc').limit(250).get(),
-    db.collection('newsletterSubscribers').where('status', '==', 'subscribed').count().get(),
-    verifiedAccountEmails(),
+    subscribedEmails(),
+    verifiedAccountDirectory(),
   ])
   const changed = resendConfigured() ? await reconcileQueuedBroadcasts(initialQueue.docs) : false
   const [campaigns, queue] = changed ? await Promise.all([
     db.collection('emailCampaigns').orderBy('updatedAt', 'desc').limit(100).get(),
     db.collection('emailQueue').orderBy('createdAt', 'desc').limit(250).get(),
   ]) : [initialCampaigns, initialQueue]
+  const audienceCandidates = buildAudienceCandidates(subscriberEmails, accountDirectory)
+  const audienceDirectoryLimit = 2_000
   return {
     configured: resendConfigured(),
     audienceCounts: {
-      mailingList: subscriberCount.data().count,
-      verifiedAccounts: new Set(accountEmails).size,
+      mailingList: new Set(subscriberEmails).size,
+      verifiedAccounts: new Set(accountDirectory.map((account) => account.email)).size,
     },
+    audienceCandidates: audienceCandidates.slice(0, audienceDirectoryLimit),
+    audienceDirectoryComplete: audienceCandidates.length <= audienceDirectoryLimit,
     campaigns: campaigns.docs.map((document) => campaignForClient(document.id, document.data())),
     queue: queue.docs.map((document) => emailQueueItemForClient(document.id, document.data())),
   }
+})
+
+export const searchEmailCampaignAudience = onCall(providerOptions, async (request) => {
+  await requireAdminContext(request as CallableRequestLike)
+  const parsed = audienceSearchSchema.safeParse(request.data ?? {})
+  if (!parsed.success) throw new HttpsError('invalid-argument', 'Choose a valid campaign audience search.')
+  const [subscriberEmails, accountDirectory] = await Promise.all([subscribedEmails(), verifiedAccountDirectory()])
+  return pageAudienceCandidates(buildAudienceCandidates(subscriberEmails, accountDirectory), parsed.data)
 })
 
 export const saveEmailCampaign = onCall(protectedOptions, async (request) => {

@@ -16,5 +16,5 @@ export default defineConfig({
       },
     },
   },
-  test: { globals: true, environment: 'jsdom', setupFiles: './tests/setup.ts', exclude: ['tests/rules/**', 'functions/**', '**/node_modules/**', 'dist/**'] },
+  test: { globals: true, environment: 'jsdom', setupFiles: './tests/setup.ts', maxWorkers: 1, exclude: ['tests/rules/**', 'functions/**', '**/node_modules/**', 'dist/**'] },
 })

@@ -9439,6 +9439,17 @@ body {
   background: #fff3f0;
   color: #88443b;
 }
+.account-request-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.account-request-error .account-text-button {
+  flex: 0 0 auto;
+  color: inherit;
+  font-weight: 700;
+}
 .account-security-health {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

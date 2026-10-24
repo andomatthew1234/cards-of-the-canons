@@ -1,10 +1,12 @@
 import { Check, CircleAlert, ListFilter, Mails, Plus } from 'lucide-react'
-import { useCallback, useEffect, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { AdminPageHeader, ConfirmDialog, ErrorState, LoadingState } from '../../admin/components'
+import { AdminReauthenticationDialog } from '../../components/admin/AdminReauthenticationDialog'
 import { PageMeta } from '../../components/PageMeta'
 import {
   cancelScheduledEmailCampaign, deleteEmailCampaign, listEmailCampaignWorkspace, retryEmailCampaign,
 } from '../../lib/data'
+import { requiresRecentAuthentication } from '../../lib/recentAuthentication'
 import type { EmailCampaign, EmailCampaignDraft, EmailCampaignWorkspace, EmailQueueItem } from '../../types'
 import { CampaignDashboard, EmailQueueDashboard } from './email-campaigns'
 import { CampaignStudio, campaignToDraft } from './email-campaigns/CampaignStudio'
@@ -24,6 +26,8 @@ export function EmailCampaignsPage() {
   const [editing, setEditing] = useState<EmailCampaignDraft | null>(null)
   const [working, setWorking] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<EmailCampaign | null>(null)
+  const [reauthOpen, setReauthOpen] = useState(false)
+  const pendingEmailActionRef = useRef<null | (() => Promise<boolean>)>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
@@ -34,11 +38,25 @@ export function EmailCampaignsPage() {
 
   useEffect(() => { void load() }, [load])
 
-  const act = async (key: string, action: () => Promise<unknown>, success: string) => {
+  const act = async (key: string, action: () => Promise<unknown>, success: string, afterReauthentication = false): Promise<boolean> => {
     setWorking(key); setError(''); setNotice('')
-    try { await action(); setNotice(success); await load() }
-    catch (actionError) { setError(actionError instanceof Error ? actionError.message : 'This action could not be completed.') }
+    try { await action(); setNotice(success); await load(); return true }
+    catch (actionError) {
+      if (!afterReauthentication && requiresRecentAuthentication(actionError)) {
+        pendingEmailActionRef.current = () => act(key, action, success, true)
+        setReauthOpen(true)
+      } else setError(actionError instanceof Error ? actionError.message : 'This action could not be completed.')
+      return false
+    }
     finally { setWorking('') }
+  }
+
+  const completeReauthentication = async () => {
+    const action = pendingEmailActionRef.current
+    if (!action) { setReauthOpen(false); return }
+    await action()
+    pendingEmailActionRef.current = null
+    setReauthOpen(false)
   }
 
   const remove = async () => {
@@ -94,6 +112,7 @@ export function EmailCampaignsPage() {
         </>}
       </div>
       <ConfirmDialog open={Boolean(deleteTarget)} title="Delete this draft?" description={`“${deleteTarget?.name ?? ''}” will be permanently removed. No recipient or consent records are affected.`} confirmLabel="Delete draft" busy={working.startsWith('delete-')} onCancel={() => setDeleteTarget(null)} onConfirm={() => void remove()} />
+      <AdminReauthenticationDialog open={reauthOpen} actionLabel="Confirm your identity to retry this email campaign." onCancel={() => { pendingEmailActionRef.current = null; setReauthOpen(false) }} onAuthenticated={completeReauthentication} />
     </div>
   </>
 }

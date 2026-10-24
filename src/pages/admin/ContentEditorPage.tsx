@@ -1,11 +1,12 @@
 import { ImagePlus, Save } from 'lucide-react'
 import { type FormEvent, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AdminPageHeader, AdminPanel, EmptyState, Field, LoadingState, RichTextField, StatusBadge } from '../../admin/components'
+import { AdminPageHeader, AdminPanel, EmptyState, ErrorState, Field, LoadingState, RichTextField, StatusBadge } from '../../admin/components'
 import { useAdminData } from '../../admin/AdminContext'
 import { useUnsavedChanges } from '../../admin/utils'
 import { PageMeta } from '../../components/PageMeta'
 import { defaultPageContent, normalisePageContent } from '../../context/SiteContentContext'
+import { friendlyAuthError } from '../../context/AuthContext'
 import { getPageContent, savePageContent, uploadPageImage } from '../../lib/data'
 import type { HomePageSections, PageContent } from '../../types'
 
@@ -17,22 +18,26 @@ export function ContentEditorPage() {
   const [content, setContent] = useState<PageContent | null>(null)
   const [baseline, setBaseline] = useState('')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [requestVersion, setRequestVersion] = useState(0)
   const [uploading, setUploading] = useState<string | null>(null)
 
   useEffect(() => {
     if (!validPage) { setLoading(false); return }
     let active = true
+    setLoading(true); setLoadError(''); setContent(null)
     void getPageContent(validPage).then((stored) => {
       if (!active) return
       const next = normalisePageContent(stored ?? defaultPageContent[validPage])
       setContent(next); setBaseline(JSON.stringify(next)); setLoading(false)
-    }).catch(() => { if (active) { const next = normalisePageContent(defaultPageContent[validPage]); setContent(next); setBaseline(JSON.stringify(next)); setLoading(false) } })
+    }).catch((error) => { if (active) { setLoadError(friendlyAuthError(error)); setLoading(false) } })
     return () => { active = false }
-  }, [validPage])
+  }, [requestVersion, validPage])
 
   const dirty = Boolean(content && JSON.stringify(content) !== baseline)
-  useUnsavedChanges(dirty, 'Leave the content editor and discard your unsaved changes?')
+  const allowNextNavigation = useUnsavedChanges(dirty, 'Leave the content editor and discard your unsaved changes?')
   if (!validPage) return <EmptyState title="Content page not found" description="This content area is not supported by the current site model." action={<Link className="button secondary" to="/admin/content">Back to content</Link>} />
+  if (loadError) return <ErrorState message={loadError} onRetry={() => setRequestVersion((current) => current + 1)} />
   if (loading || !content) return <LoadingState label={`Loading ${validPage} content…`} />
 
   const title = validPage === 'home' ? 'Home page' : 'About page'
@@ -58,7 +63,7 @@ export function ContentEditorPage() {
     const success = await runAction(`page-${validPage}`, () => savePageContent(content), `${title} content saved.`)
     if (success) setBaseline(JSON.stringify(content))
   }
-  const cancel = () => { if (!dirty || window.confirm('Discard your unsaved content changes?')) navigate('/admin/content') }
+  const cancel = () => { if (!dirty || window.confirm('Discard your unsaved content changes?')) { allowNextNavigation(); navigate('/admin/content') } }
   const sections = content.sections ?? defaultPageContent.home.sections!
 
   return <>

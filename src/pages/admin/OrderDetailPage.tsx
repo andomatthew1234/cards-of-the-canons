@@ -1,7 +1,7 @@
 import { ArrowLeft, ExternalLink, FlaskConical, KeyRound, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { AdminPageHeader, AdminPanel, ConfirmDialog, EmptyState, LoadingState, OrderEnvironmentBadge, StatusBadge } from '../../admin/components'
+import { AdminPageHeader, AdminPanel, ConfirmDialog, EmptyState, ErrorState, LoadingState, OrderEnvironmentBadge, StatusBadge } from '../../admin/components'
 import { useAdminData } from '../../admin/AdminContext'
 import { formatAdminDate, orderTone } from '../../admin/utils'
 import { PageMeta } from '../../components/PageMeta'
@@ -13,8 +13,9 @@ export function OrderDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [dismissOpen, setDismissOpen] = useState(false)
-  const { orders, accounts, loading, busy, runAction } = useAdminData()
+  const { orders, accounts, loading, errors, busy, runAction, refresh } = useAdminData()
   if (loading) return <LoadingState label="Loading order…" />
+  if (errors.orders) return <ErrorState message={errors.orders} onRetry={() => void refresh()} />
   const order = orders.find((item) => item.id === id)
   if (!order) return <EmptyState title="Order not found" description="It may have been removed or the link is no longer valid." action={<Link className="button secondary" to="/admin/orders"><ArrowLeft /> Back to orders</Link>} />
   const account = accounts.find((item) => item.uid === order.userId)
@@ -33,7 +34,7 @@ export function OrderDetailPage() {
       <aside className="admin-editor-aside"><AdminPanel title="Fulfilment"><div className="admin-form-stack"><div className="admin-publish-summary"><StatusBadge tone={orderTone(order.status)}>{order.status.replace('_', ' ')}</StatusBadge><p>{allowed.length ? 'Choose an allowed status transition below.' : 'This order has no browser-managed status transitions.'}</p></div>{allowed.map((nextStatus) => <button className={nextStatus === 'cancelled' ? 'button secondary danger' : 'button primary'} disabled={busy === `order-${order.id}`} key={nextStatus} onClick={() => void runAction(`order-${order.id}`, () => updateOrderStatus(order.id, nextStatus as 'paid' | 'fulfilled' | 'cancelled'), `Order marked ${nextStatus}.`)}>Mark {nextStatus}</button>)}</div></AdminPanel>
         <AdminPanel title="Treasury codes" description="Prepare the physical card codes included while packing this order."><div className="admin-form-stack"><p className="admin-help">Choose the actual cards being packed; a product or pack does not automatically identify the card inside.</p><Link className="button secondary" to={`/admin/treasury?order=${encodeURIComponent(order.id)}`}><KeyRound aria-hidden="true" /> Prepare card codes</Link></div></AdminPanel>
         {isTestOrder && <AdminPanel title="Sandbox cleanup" description="Available only for test orders."><div className="admin-danger-zone"><p className="admin-help">Dismiss this test after reviewing the checkout flow. It will disappear from the customer account and administrator dashboard.</p><button className="button secondary danger" disabled={busy === `dismiss-order-${order.id}`} onClick={() => setDismissOpen(true)}><Trash2 aria-hidden="true" /> Dismiss test order</button></div></AdminPanel>}
-        <AdminPanel title="Customer"><div className="admin-customer-summary"><strong>{account?.displayName || 'Customer account'}</strong><span>{account?.email || order.userId}</span>{account && <Link className="text-button" to={`/admin/customers/${encodeURIComponent(account.uid)}`}>View customer <ExternalLink /></Link>}</div></AdminPanel></aside></div>
+        <AdminPanel title="Customer">{errors.accounts ? <ErrorState message={errors.accounts} onRetry={() => void refresh()} /> : <div className="admin-customer-summary"><strong>{account?.displayName || 'Customer account'}</strong><span>{account?.email || order.userId}</span>{account && <Link className="text-button" to={`/admin/customers/${encodeURIComponent(account.uid)}`}>View customer <ExternalLink /></Link>}</div>}</AdminPanel></aside></div>
     <ConfirmDialog open={dismissOpen} title="Dismiss this sandbox order?" description="This permanently removes the test order from the storefront, customer account and administrator dashboard. Any reserved or committed test inventory is restored. Live orders cannot be dismissed." confirmLabel="Dismiss test order" busy={busy === `dismiss-order-${order.id}`} onCancel={() => setDismissOpen(false)} onConfirm={() => void confirmDismiss()} />
   </>
 }

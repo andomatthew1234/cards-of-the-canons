@@ -2,6 +2,7 @@ import { BookOpenCheck, Check, Clipboard, Download, KeyRound, Plus, RefreshCw, S
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { AdminPageHeader, AdminPanel, EmptyState, Field, LoadingState, StatusBadge } from '../../admin/components'
+import { useUnsavedChanges } from '../../admin/utils'
 import { PageMeta } from '../../components/PageMeta'
 import { friendlyAuthError } from '../../context/AuthContext'
 import { generateTreasuryCodeBatch, getTreasuryAdminState, revokeTreasuryCodeBatch, saveTreasuryCard, saveTreasuryEdition } from '../../lib/treasury'
@@ -9,6 +10,7 @@ import type { TreasuryAdminState, TreasuryCard, TreasuryEdition } from '../../ty
 
 const blankEdition: Omit<TreasuryEdition, 'id'> = { title: '', description: '', coverImageUrl: '', coverImageAlt: '', status: 'draft', sortOrder: 1 }
 const blankCard = (editionId = ''): Omit<TreasuryCard, 'collected' | 'quantity' | 'firstCollectedAt' | 'lastCollectedAt'> => ({ id: '', editionId, number: '', title: '', teaser: '', story: '', imageUrl: '', imageAlt: '', status: 'draft', sortOrder: 1 })
+const initialEdition = () => ({ ...blankEdition, starterCardCount: 12 })
 
 export function TreasuryPage() {
   const [params] = useSearchParams()
@@ -20,19 +22,31 @@ export function TreasuryPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [selectedEditionId, setSelectedEditionId] = useState('')
-  const [edition, setEdition] = useState<Omit<TreasuryEdition, 'id'> & { id?: string; starterCardCount: number }>({ ...blankEdition, starterCardCount: 12 })
+  const [edition, setEdition] = useState<Omit<TreasuryEdition, 'id'> & { id?: string; starterCardCount: number }>(initialEdition)
+  const [editionBaseline, setEditionBaseline] = useState(() => JSON.stringify(initialEdition()))
   const [card, setCard] = useState<ReturnType<typeof blankCard>>(blankCard())
+  const [cardBaseline, setCardBaseline] = useState(() => JSON.stringify(blankCard()))
   const [batch, setBatch] = useState({ cardId: '', quantity: 1, label: '', orderId })
+  const [batchBaseline, setBatchBaseline] = useState(() => JSON.stringify({ cardId: '', quantity: 1, label: '', orderId }))
   const [generated, setGenerated] = useState<{ batchId: string; codes: string[] } | null>(null)
+  const [codesSecured, setCodesSecured] = useState(false)
+  const editionDirty = JSON.stringify(edition) !== editionBaseline
+  const cardDirty = JSON.stringify(card) !== cardBaseline
+  const batchDirty = JSON.stringify(batch) !== batchBaseline
+  useUnsavedChanges(editionDirty || cardDirty || batchDirty || Boolean(generated && !codesSecured), 'Leave Treasury and discard unsaved form changes or unsaved one-time codes?')
 
   const load = async () => {
     setError('')
     const next = await getTreasuryAdminState()
     setState(next)
     setSelectedEditionId((current) => current || next.editions[0]?.id || '')
-    setBatch((current) => ({ ...current, cardId: current.cardId || next.cards[0]?.id || '' }))
+    setBatch((current) => {
+      const updated = { ...current, cardId: current.cardId || next.cards[0]?.id || '' }
+      if (!current.cardId) setBatchBaseline(JSON.stringify(updated))
+      return updated
+    })
   }
-  useEffect(() => { let active = true; void getTreasuryAdminState().then((next) => { if (active) { setState(next); setSelectedEditionId(next.editions[0]?.id || ''); setBatch((current) => ({ ...current, cardId: next.cards[0]?.id || '' })) } }).catch((loadError) => { if (active) setError(friendlyAuthError(loadError)) }).finally(() => { if (active) setLoading(false) }); return () => { active = false } }, [])
+  useEffect(() => { let active = true; void getTreasuryAdminState().then((next) => { if (active) { setState(next); setSelectedEditionId(next.editions[0]?.id || ''); setBatch((current) => { const updated = { ...current, cardId: next.cards[0]?.id || '' }; setBatchBaseline(JSON.stringify(updated)); return updated }) } }).catch((loadError) => { if (active) setError(friendlyAuthError(loadError)) }).finally(() => { if (active) setLoading(false) }); return () => { active = false } }, [])
 
   const selectedCards = useMemo(() => state.cards.filter((item) => item.editionId === selectedEditionId), [selectedEditionId, state.cards])
   const editionName = (id: string) => state.editions.find((item) => item.id === id)?.title || 'Unknown set'
@@ -47,26 +61,31 @@ export function TreasuryPage() {
     event.preventDefault()
     void run('edition', async () => {
       const id = await saveTreasuryEdition(edition)
-      setSelectedEditionId(id); setEdition({ ...blankEdition, starterCardCount: 12 })
+      const reset = initialEdition()
+      setSelectedEditionId(id); setEdition(reset); setEditionBaseline(JSON.stringify(reset))
     }, edition.id ? 'Collection set updated.' : 'Collection set and starter card slots created.')
   }
-  const editEdition = (item: TreasuryEdition) => setEdition({ ...item, starterCardCount: 0 })
+  const editEdition = (item: TreasuryEdition) => {
+    if (editionDirty && !window.confirm('Discard the unsaved collection-set changes?')) return
+    const next = { ...item, starterCardCount: 0 }
+    setEdition(next); setEditionBaseline(JSON.stringify(next))
+  }
   const saveCard = (event: FormEvent) => {
     event.preventDefault()
-    void run('card', async () => { await saveTreasuryCard(card); setCard(blankCard(selectedEditionId)) }, card.id ? 'Card updated.' : 'Card added.')
+    void run('card', async () => { await saveTreasuryCard(card); const reset = blankCard(selectedEditionId); setCard(reset); setCardBaseline(JSON.stringify(reset)) }, card.id ? 'Card updated.' : 'Card added.')
   }
   const generate = (event: FormEvent) => {
     event.preventDefault()
-    void run('codes', async () => { setGenerated(await generateTreasuryCodeBatch(batch)) }, 'Codes generated. Save or print them now; they cannot be shown again.')
+    void run('codes', async () => { setGenerated(await generateTreasuryCodeBatch(batch)); setBatchBaseline(JSON.stringify(batch)); setCodesSecured(false) }, 'Codes generated. Save or print them now; they cannot be shown again.')
   }
   const download = () => {
     if (!generated) return
     const selected = state.cards.find((item) => item.id === batch.cardId)
     const rows = ['Code,Collection set,Card,Order reference', ...generated.codes.map((code) => `"${code}","${editionName(selected?.editionId || '')}","${selected?.title || ''}","${batch.orderId}"`)]
     const url = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' }))
-    const link = document.createElement('a'); link.href = url; link.download = `doxa-card-codes-${generated.batchId}.csv`; link.click(); URL.revokeObjectURL(url)
+    const link = document.createElement('a'); link.href = url; link.download = `doxa-card-codes-${generated.batchId}.csv`; link.click(); URL.revokeObjectURL(url); setCodesSecured(true)
   }
-  const copyCodes = async () => { if (generated) { await navigator.clipboard.writeText(generated.codes.join('\n')); setNotice('Codes copied to the clipboard.') } }
+  const copyCodes = async () => { if (generated) { await navigator.clipboard.writeText(generated.codes.join('\n')); setCodesSecured(true); setNotice('Codes copied to the clipboard.') } }
   const revoke = (id: string) => {
     const reason = window.prompt('Why are these unused codes being revoked?')?.trim()
     if (!reason) return
@@ -83,9 +102,9 @@ export function TreasuryPage() {
 
     {tab === 'sets' && <div className="treasury-admin-grid"><AdminPanel title="Collection sets" description="Each published set becomes a tab in every customer's Treasury.">
       {state.editions.length ? <div className="treasury-admin-list">{state.editions.map((item) => <button key={item.id} onClick={() => editEdition(item)}><BookOpenCheck aria-hidden="true" /><span><strong>{item.title}</strong><small>{state.cards.filter((cardItem) => cardItem.editionId === item.id).length} cards</small></span><StatusBadge tone={item.status === 'published' ? 'positive' : item.status === 'archived' ? 'warning' : 'neutral'}>{item.status}</StatusBadge></button>)}</div> : <EmptyState title="No collection sets yet" description="Create the first set and twelve editable card placeholders in one step." icon={<BookOpenCheck />} />}
-    </AdminPanel><AdminPanel title={edition.id ? `Edit ${edition.title}` : 'Create a collection set'} description={edition.id ? 'Published changes appear in customer accounts immediately.' : 'The default creates twelve neutral placeholders ready for approved content.'}><form className="admin-form-stack" onSubmit={saveEdition}><Field label="Set title"><input required minLength={2} maxLength={120} value={edition.title} onChange={(event) => setEdition((current) => ({ ...current, title: event.target.value }))} /></Field><Field label="Description"><textarea rows={5} maxLength={1500} value={edition.description} onChange={(event) => setEdition((current) => ({ ...current, description: event.target.value }))} /></Field><div className="admin-form-grid"><Field label="Display order"><input type="number" min={0} max={10000} value={edition.sortOrder} onChange={(event) => setEdition((current) => ({ ...current, sortOrder: Number(event.target.value) }))} /></Field><Field label="Status"><select value={edition.status} onChange={(event) => setEdition((current) => ({ ...current, status: event.target.value as TreasuryEdition['status'] }))}><option value="draft">Draft</option><option value="published">Published</option><option value="archived">Archived</option></select></Field>{!edition.id && <Field label="Starter card slots"><input type="number" min={0} max={48} value={edition.starterCardCount} onChange={(event) => setEdition((current) => ({ ...current, starterCardCount: Number(event.target.value) }))} /></Field>}</div><Field label="Cover image URL"><input value={edition.coverImageUrl} onChange={(event) => setEdition((current) => ({ ...current, coverImageUrl: event.target.value }))} /></Field><Field label="Cover image alt text"><input maxLength={180} value={edition.coverImageAlt} onChange={(event) => setEdition((current) => ({ ...current, coverImageAlt: event.target.value }))} /></Field><div className="admin-page-actions"><button type="button" className="button secondary" onClick={() => setEdition({ ...blankEdition, starterCardCount: 12 })}>Clear</button><button className="button primary" disabled={busy === 'edition'}>{busy === 'edition' ? 'Saving…' : edition.id ? 'Save set' : 'Create set'}</button></div></form></AdminPanel></div>}
+    </AdminPanel><AdminPanel title={edition.id ? `Edit ${edition.title}` : 'Create a collection set'} description={edition.id ? 'Published changes appear in customer accounts immediately.' : 'The default creates twelve neutral placeholders ready for approved content.'}><form className="admin-form-stack" onSubmit={saveEdition}><Field label="Set title"><input required minLength={2} maxLength={120} value={edition.title} onChange={(event) => setEdition((current) => ({ ...current, title: event.target.value }))} /></Field><Field label="Description"><textarea rows={5} maxLength={1500} value={edition.description} onChange={(event) => setEdition((current) => ({ ...current, description: event.target.value }))} /></Field><div className="admin-form-grid"><Field label="Display order"><input type="number" min={0} max={10000} value={edition.sortOrder} onChange={(event) => setEdition((current) => ({ ...current, sortOrder: Number(event.target.value) }))} /></Field><Field label="Status"><select value={edition.status} onChange={(event) => setEdition((current) => ({ ...current, status: event.target.value as TreasuryEdition['status'] }))}><option value="draft">Draft</option><option value="published">Published</option><option value="archived">Archived</option></select></Field>{!edition.id && <Field label="Starter card slots"><input type="number" min={0} max={48} value={edition.starterCardCount} onChange={(event) => setEdition((current) => ({ ...current, starterCardCount: Number(event.target.value) }))} /></Field>}</div><Field label="Cover image URL"><input value={edition.coverImageUrl} onChange={(event) => setEdition((current) => ({ ...current, coverImageUrl: event.target.value }))} /></Field><Field label="Cover image alt text"><input maxLength={180} value={edition.coverImageAlt} onChange={(event) => setEdition((current) => ({ ...current, coverImageAlt: event.target.value }))} /></Field><div className="admin-page-actions"><button type="button" className="button secondary" onClick={() => { const reset = initialEdition(); setEdition(reset); setEditionBaseline(JSON.stringify(reset)) }}>Clear</button><button className="button primary" disabled={busy === 'edition'}>{busy === 'edition' ? 'Saving…' : edition.id ? 'Save set' : 'Create set'}</button></div></form></AdminPanel></div>}
 
-    {tab === 'cards' && <div className="treasury-admin-grid"><AdminPanel title="Cards" description="Choose a collection set, then edit its locked preview and revealed story."><Field label="Collection set"><select value={selectedEditionId} onChange={(event) => { setSelectedEditionId(event.target.value); setCard(blankCard(event.target.value)) }}><option value="">Choose a set</option>{state.editions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></Field>{selectedCards.length ? <div className="treasury-admin-list card-list">{selectedCards.map((item) => <button key={item.id} onClick={() => setCard(item)}><span className="treasury-admin-card-number">{item.number}</span><span><strong>{item.title}</strong><small>{item.teaser || 'No locked preview yet'}</small></span><StatusBadge tone={item.status === 'published' ? 'positive' : 'neutral'}>{item.status}</StatusBadge></button>)}</div> : <p className="admin-panel-empty">Choose a set or create its first card.</p>}<button className="button secondary grow" disabled={!selectedEditionId} onClick={() => setCard(blankCard(selectedEditionId))}><Plus /> Add card</button></AdminPanel>
+    {tab === 'cards' && <div className="treasury-admin-grid"><AdminPanel title="Cards" description="Choose a collection set, then edit its locked preview and revealed story."><Field label="Collection set"><select value={selectedEditionId} onChange={(event) => { if (cardDirty && !window.confirm('Discard the unsaved card changes?')) return; const reset = blankCard(event.target.value); setSelectedEditionId(event.target.value); setCard(reset); setCardBaseline(JSON.stringify(reset)) }}><option value="">Choose a set</option>{state.editions.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></Field>{selectedCards.length ? <div className="treasury-admin-list card-list">{selectedCards.map((item) => <button key={item.id} onClick={() => { if (cardDirty && !window.confirm('Discard the unsaved card changes?')) return; setCard(item); setCardBaseline(JSON.stringify(item)) }}><span className="treasury-admin-card-number">{item.number}</span><span><strong>{item.title}</strong><small>{item.teaser || 'No locked preview yet'}</small></span><StatusBadge tone={item.status === 'published' ? 'positive' : 'neutral'}>{item.status}</StatusBadge></button>)}</div> : <p className="admin-panel-empty">Choose a set or create its first card.</p>}<button className="button secondary grow" disabled={!selectedEditionId} onClick={() => { if (cardDirty && !window.confirm('Discard the unsaved card changes?')) return; const reset = blankCard(selectedEditionId); setCard(reset); setCardBaseline(JSON.stringify(reset)) }}><Plus /> Add card</button></AdminPanel>
       <AdminPanel title={card.id ? `Edit ${card.title}` : 'Card details'} description="The teaser is visible while locked. Story and full-colour artwork are returned only after collection."><form className="admin-form-stack" onSubmit={saveCard}><div className="admin-form-grid"><Field label="Card number"><input required maxLength={24} value={card.number} onChange={(event) => setCard((current) => ({ ...current, number: event.target.value }))} /></Field><Field label="Display order"><input required type="number" min={0} max={10000} value={card.sortOrder} onChange={(event) => setCard((current) => ({ ...current, sortOrder: Number(event.target.value) }))} /></Field></div><Field label="Title"><input required minLength={2} maxLength={140} value={card.title} onChange={(event) => setCard((current) => ({ ...current, title: event.target.value }))} /></Field><Field label="Locked preview"><textarea rows={3} maxLength={400} value={card.teaser} onChange={(event) => setCard((current) => ({ ...current, teaser: event.target.value }))} /></Field><Field label="Revealed story"><textarea rows={8} maxLength={12000} value={card.story} onChange={(event) => setCard((current) => ({ ...current, story: event.target.value }))} /></Field><Field label="Full-colour artwork URL"><input value={card.imageUrl} onChange={(event) => setCard((current) => ({ ...current, imageUrl: event.target.value }))} /></Field><Field label="Artwork alt text"><input maxLength={180} value={card.imageAlt} onChange={(event) => setCard((current) => ({ ...current, imageAlt: event.target.value }))} /></Field><Field label="Status"><select value={card.status} onChange={(event) => setCard((current) => ({ ...current, status: event.target.value as TreasuryCard['status'] }))}><option value="draft">Draft</option><option value="published">Published</option><option value="archived">Archived</option></select></Field><button className="button primary grow" disabled={!card.editionId || busy === 'card'}>{busy === 'card' ? 'Saving…' : card.id ? 'Save card' : 'Add card'}</button></form></AdminPanel></div>}
 
     {tab === 'codes' && <div className="treasury-admin-grid"><AdminPanel title="Generate card codes" description="Codes are cryptographically generated and shown once. Print or download them before leaving."><form className="admin-form-stack" onSubmit={generate}><Field label="Card"><select required value={batch.cardId} onChange={(event) => setBatch((current) => ({ ...current, cardId: event.target.value }))}><option value="">Choose a card</option>{state.editions.map((editionItem) => <optgroup key={editionItem.id} label={editionItem.title}>{state.cards.filter((item) => item.editionId === editionItem.id).map((item) => <option key={item.id} value={item.id}>{item.number} — {item.title}</option>)}</optgroup>)}</select></Field><div className="admin-form-grid"><Field label="Number of codes"><input required type="number" min={1} max={100} value={batch.quantity} onChange={(event) => setBatch((current) => ({ ...current, quantity: Number(event.target.value) }))} /></Field><Field label="Batch label"><input required minLength={2} maxLength={120} placeholder="e.g. October packing run" value={batch.label} onChange={(event) => setBatch((current) => ({ ...current, label: event.target.value }))} /></Field></div><Field label="Order reference" hint="Optional. The code still follows the physical card if it is gifted."><input maxLength={160} value={batch.orderId} onChange={(event) => setBatch((current) => ({ ...current, orderId: event.target.value }))} /></Field><button className="button primary grow" disabled={!batch.cardId || busy === 'codes'}><KeyRound />{busy === 'codes' ? 'Generating securely…' : 'Generate one-time codes'}</button></form>

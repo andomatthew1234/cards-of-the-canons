@@ -9,7 +9,7 @@
   "scripts": {
     "build": "node clean-lib.mjs && tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --maxWorkers=1"
   },
   "dependencies": {
     "@google-cloud/firestore": "^9.3.0",

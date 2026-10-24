@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseEmailCampaignDraft, parseEmailCampaignSaveDraft, renderEmailCampaign } from './emailCampaigns'
+import { buildAudienceCandidates, pageAudienceCandidates, parseEmailCampaignDraft, parseEmailCampaignSaveDraft, renderEmailCampaign } from './emailCampaigns'
 
 describe('structured email campaign rendering', () => {
   it('escapes administrator content and keeps marketing unsubscribe controls', () => {
@@ -106,5 +106,37 @@ describe('structured email campaign rendering', () => {
       revision: 0, name: 'Unsafe style', subject: 'Do not send', previewText: '', purpose: 'marketing', audience: 'mailing_list', recipientEmails: [],
       blocks: [{ id: 'unsafe-style', type: 'paragraph', text: 'Hello', url: '', alt: '', caption: '', align: 'left', size: 'medium', backgroundColor: 'url(javascript:alert(1))' }],
     })).toThrow()
+  })
+
+  it('builds a consent-scoped, deduplicated audience directory', () => {
+    expect(buildAudienceCandidates(
+      [' Subscribed@Example.com ', 'subscribed@example.com'],
+      [
+        { email: 'subscribed@example.com', label: 'Subscribed Member · subscribed@example.com' },
+        { email: 'verified@example.com', label: 'Verified Member · verified@example.com' },
+      ],
+    )).toEqual([
+      { email: 'subscribed@example.com', label: 'Subscribed Member · subscribed@example.com', subscribed: true, verified: true },
+      { email: 'verified@example.com', label: 'Verified Member · verified@example.com', subscribed: false, verified: true },
+    ])
+  })
+
+  it('searches and paginates eligible individual recipients without truncation', () => {
+    const candidates = buildAudienceCandidates(
+      ['first@example.com', 'later@example.com'],
+      [{ email: 'account@example.com', label: 'Account member' }],
+    )
+    expect(pageAudienceCandidates(candidates, { query: '', purpose: 'marketing', pageSize: 1 })).toEqual({
+      candidates: [expect.objectContaining({ email: 'first@example.com' })],
+      nextCursor: 'first@example.com',
+    })
+    expect(pageAudienceCandidates(candidates, { query: '', purpose: 'marketing', cursor: 'first@example.com', pageSize: 1 })).toEqual({
+      candidates: [expect.objectContaining({ email: 'later@example.com' })],
+      nextCursor: null,
+    })
+    expect(pageAudienceCandidates(candidates, { query: 'account', purpose: 'marketing', pageSize: 10 }).candidates).toEqual([])
+    expect(pageAudienceCandidates(candidates, { query: 'account', purpose: 'service', pageSize: 10 }).candidates).toEqual([
+      expect.objectContaining({ email: 'account@example.com' }),
+    ])
   })
 })

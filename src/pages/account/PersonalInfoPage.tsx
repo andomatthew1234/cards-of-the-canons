@@ -1,7 +1,7 @@
 import { CheckCircle2, Mail, Pencil, Phone, UserRound, X } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { AccountCentreShell } from '../../components/account/AccountChrome'
-import { AccountFeedback, AccountPanel, AccountSettingRow, AccountStatus, AccountTextLink } from '../../components/account/AccountCentreUI'
+import { AccountFeedback, AccountPanel, AccountRequestError, AccountSettingRow, AccountStatus, AccountTextLink } from '../../components/account/AccountCentreUI'
 import { friendlyAuthError, useAuth } from '../../context/AuthContext'
 import { getUserProfile, saveUserProfile } from '../../lib/accounts'
 import { maskEmail } from '../../lib/security'
@@ -13,14 +13,21 @@ export function PersonalInfoPage() {
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const [requestVersion, setRequestVersion] = useState(0)
   const [feedback, setFeedback] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
 
   useEffect(() => {
-    if (!auth.user) return
+    if (!auth.user) { setLoading(false); return }
     let active = true
-    void getUserProfile(auth.user.uid).then((value) => { if (active) setProfile(value) }).finally(() => { if (active) setLoading(false) })
+    setLoading(true)
+    setLoadError('')
+    void getUserProfile(auth.user.uid)
+      .then((value) => { if (active) setProfile(value) })
+      .catch((requestError) => { if (active) setLoadError(friendlyAuthError(requestError)) })
+      .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [auth.user])
+  }, [auth.user, requestVersion])
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -48,10 +55,11 @@ export function PersonalInfoPage() {
   const name = profile?.displayName || auth.user?.displayName || 'Collector'
   return <AccountCentreShell title="Personal info & details" eyebrow="Your identity" description="Manage the profile and contact information used across your account.">
     {feedback && <AccountFeedback tone={feedback.tone}>{feedback.text}</AccountFeedback>}
+    {loadError && <AccountRequestError message={loadError} onRetry={() => setRequestVersion((current) => current + 1)} />}
     <AccountPanel title="Basic information" description="These details identify you within Doxa.">
       {!editing ? <>
-        <AccountSettingRow icon={<UserRound aria-hidden="true" />} title="Name" description={<><p>{loading ? 'Loading…' : name}</p><small>Used on your account and when you submit an enquiry while signed in.</small></>} action={<button className="account-text-button" onClick={() => setEditing(true)}><Pencil aria-hidden="true" /> Edit</button>} />
-        <AccountSettingRow icon={<Phone aria-hidden="true" />} title="Phone" description={<><p>{profile?.phone || 'Not provided'}</p><small>Optional contact information stored in your private profile.</small></>} action={<button className="account-text-button" onClick={() => setEditing(true)}><Pencil aria-hidden="true" /> Edit</button>} />
+        <AccountSettingRow icon={<UserRound aria-hidden="true" />} title="Name" description={<><p>{loading ? 'Loading…' : loadError ? 'Unavailable' : name}</p><small>Used on your account and when you submit an enquiry while signed in.</small></>} action={!loadError && !loading ? <button className="account-text-button" onClick={() => setEditing(true)}><Pencil aria-hidden="true" /> Edit</button> : undefined} />
+        <AccountSettingRow icon={<Phone aria-hidden="true" />} title="Phone" description={<><p>{loading ? 'Loading…' : loadError ? 'Unavailable' : profile?.phone || 'Not provided'}</p><small>Optional contact information stored in your private profile.</small></>} action={!loadError && !loading ? <button className="account-text-button" onClick={() => setEditing(true)}><Pencil aria-hidden="true" /> Edit</button> : undefined} />
       </> : <form className="account-edit-form" onSubmit={submit}>
         <div className="account-edit-heading"><div><h3>Edit personal information</h3><p>Update the details used across your account.</p></div><button type="button" className="icon-button" aria-label="Close personal information editor" onClick={() => setEditing(false)}><X aria-hidden="true" /></button></div>
         <div className="security-form-grid"><label>Display name<input name="displayName" defaultValue={name} minLength={2} maxLength={80} required autoComplete="name" /></label><label>Phone <span>(optional)</span><input name="phone" type="tel" defaultValue={profile?.phone ?? ''} maxLength={30} autoComplete="tel" /></label></div>

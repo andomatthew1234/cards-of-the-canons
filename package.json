@@ -13,7 +13,7 @@
     "artifact:check": "node scripts/check-dist.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=1",
     "test:ci": "vitest run --maxWorkers=1",
     "test:functions": "npm --prefix functions test",
     "test:watch": "vitest",

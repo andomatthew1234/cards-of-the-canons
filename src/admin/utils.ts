@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
 import type { OrderStatus } from '../types'
+
+export { useUnsavedChanges } from './UnsavedChanges'
 
 export function formatAdminDate(value: unknown, fallback = 'Date unavailable') {
   if (!value) return fallback
@@ -56,29 +57,4 @@ export function downloadCsv(filename: string, rows: Array<Array<string | number 
   link.download = filename
   link.click()
   URL.revokeObjectURL(url)
-}
-
-export function useUnsavedChanges(dirty: boolean, message = 'Leave this page and discard your unsaved changes?') {
-  useEffect(() => {
-    if (!dirty) return
-    const beforeUnload = (event: BeforeUnloadEvent) => event.preventDefault()
-    const guardLinks = (event: MouseEvent) => {
-      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-      const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null
-      if (!anchor || anchor.target === '_blank' || anchor.hasAttribute('download')) return
-      const destination = new URL(anchor.href, window.location.href)
-      const current = new URL(window.location.href)
-      const leavesView = destination.origin === current.origin && `${destination.pathname}${destination.search}` !== `${current.pathname}${current.search}`
-      if (leavesView && !window.confirm(message)) {
-        event.preventDefault()
-        event.stopPropagation()
-      }
-    }
-    window.addEventListener('beforeunload', beforeUnload)
-    document.addEventListener('click', guardLinks, true)
-    return () => {
-      window.removeEventListener('beforeunload', beforeUnload)
-      document.removeEventListener('click', guardLinks, true)
-    }
-  }, [dirty, message])
 }

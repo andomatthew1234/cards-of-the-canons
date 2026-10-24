@@ -21,3 +21,7 @@ export function AccountTextLink({ to, children }: { to: string; children: ReactN
 export function AccountFeedback({ tone, children }: { tone: 'success' | 'error'; children: ReactNode }) {
   return <p className={`account-feedback ${tone}`} role={tone === 'error' ? 'alert' : 'status'}>{children}</p>
 }
+
+export function AccountRequestError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return <div className="account-feedback account-request-error error" role="alert"><span>{message}</span><button type="button" className="account-text-button" onClick={onRetry}>Try again</button></div>
+}

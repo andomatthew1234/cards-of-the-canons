@@ -10,16 +10,17 @@ import {
   PanelRightClose, PanelRightOpen, Plus, Redo2, Save, Send, Smartphone, Space, Trash2, Type, Undo2, Users, X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { useAdminData } from '../../../admin/AdminContext'
 import { ConfirmDialog, Field, SearchField } from '../../../admin/components'
+import { AdminReauthenticationDialog } from '../../../components/admin/AdminReauthenticationDialog'
 import { useUnsavedChanges } from '../../../admin/utils'
 import {
-  queueEmailCampaign, saveEmailCampaign, sendEmailCampaignTest, uploadEmailCampaignImage,
+  queueEmailCampaign, saveEmailCampaign, searchEmailCampaignAudience, sendEmailCampaignTest, uploadEmailCampaignImage,
 } from '../../../lib/data'
 import type {
   EmailCampaign, EmailCampaignAudience, EmailCampaignBlock, EmailCampaignBlockType, EmailCampaignDraft,
   EmailCampaignPurpose, EmailCampaignWorkspace,
 } from '../../../types'
+import { requiresRecentAuthentication } from '../../../lib/recentAuthentication'
 import {
   BLOCK_COLOURS, campaignTemplates, createBlock, duplicateBlock, findBlock, findLocation, insertBlock, mapBlock,
   moveBlock, normaliseBlocks, removeBlock, validateCampaignDraft,
@@ -125,7 +126,6 @@ function PropertiesInspector({ block, working, onUpdate, onUpload, onDuplicate, 
 }
 
 export function CampaignStudio({ initial, workspace, onClose, onChanged }: { initial: EmailCampaignDraft; workspace: EmailCampaignWorkspace; onClose: () => void; onChanged: () => Promise<void> }) {
-  const { accounts, subscribers } = useAdminData()
   const normalised = useMemo(() => ({ ...initial, blocks: normaliseBlocks(initial.blocks) }), [initial])
   const [history, setHistory] = useState<History>({ past: [], present: normalised, future: [] })
   const draft = history.present
@@ -140,14 +140,21 @@ export function CampaignStudio({ initial, workspace, onClose, onChanged }: { ini
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [recipientSearch, setRecipientSearch] = useState('')
+  const [audienceCandidates, setAudienceCandidates] = useState<EmailCampaignWorkspace['audienceCandidates']>([])
+  const [audienceCursor, setAudienceCursor] = useState<string | null>(null)
+  const [audienceLoading, setAudienceLoading] = useState(false)
+  const [audienceError, setAudienceError] = useState('')
+  const [audienceRequestVersion, setAudienceRequestVersion] = useState(0)
   const [scheduleAt, setScheduleAt] = useState('')
   const [confirmSend, setConfirmSend] = useState<'send_now' | 'schedule' | ''>('')
+  const [reauthOpen, setReauthOpen] = useState(false)
+  const pendingEmailActionRef = useRef<null | (() => Promise<boolean>)>(null)
   const baselineRef = useRef(stripRevision(normalised))
   const latestRef = useRef(draft)
   const savePromiseRef = useRef<Promise<EmailCampaign | null> | null>(null)
   latestRef.current = draft
   const dirty = stripRevision(draft) !== baselineRef.current
-  useUnsavedChanges(dirty, 'Leave the campaign studio before the latest changes are saved?')
+  const allowNextNavigation = useUnsavedChanges(dirty, 'Leave the campaign studio before the latest changes are saved?')
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
 
   const commit = useCallback((update: (current: EmailCampaignDraft) => EmailCampaignDraft) => setHistory((current) => ({ past: [...current.past.slice(-49), current.present], present: update(current.present), future: [] })), [])
@@ -191,6 +198,19 @@ export function CampaignStudio({ initial, workspace, onClose, onChanged }: { ini
     return () => window.clearTimeout(timer)
   }, [dirty, draft, persist])
 
+  useEffect(() => {
+    if (stage !== 'audience' || draft.audience !== 'individuals') return
+    let active = true
+    const timer = window.setTimeout(() => {
+      setAudienceLoading(true); setAudienceError('')
+      void searchEmailCampaignAudience({ query: recipientSearch, purpose: draft.purpose, pageSize: 50 })
+        .then((page) => { if (active) { setAudienceCandidates(page.candidates); setAudienceCursor(page.nextCursor) } })
+        .catch((value) => { if (active) { setAudienceCandidates([]); setAudienceCursor(null); setAudienceError(value instanceof Error ? value.message : 'Recipients could not be loaded.') } })
+        .finally(() => { if (active) setAudienceLoading(false) })
+    }, recipientSearch ? 250 : 0)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [audienceRequestVersion, draft.audience, draft.purpose, recipientSearch, stage])
+
   const selected = findBlock(draft.blocks, selectedId)
   const updateBlock = (id: string, values: Partial<EmailCampaignBlock>) => commit((current) => ({ ...current, blocks: mapBlock(current.blocks, id, (block) => ({ ...block, ...values })) }))
   const deleteBlock = (id: string) => { commit((current) => ({ ...current, blocks: removeBlock(current.blocks, id).blocks })); if (selectedId === id) setSelectedId('') }
@@ -215,15 +235,19 @@ export function CampaignStudio({ initial, workspace, onClose, onChanged }: { ini
     if (active !== over) commit((current) => ({ ...current, blocks: moveBlock(current.blocks, active, target, target.index) }))
   }
 
-  const candidates = useMemo(() => {
-    const values = new Map<string, { email: string; label: string; subscribed: boolean; verified: boolean }>()
-    subscribers.forEach((person) => { const email = person.email.toLowerCase(); values.set(email, { email, label: email, subscribed: person.status === 'subscribed', verified: false }) })
-    accounts.forEach((account) => { if (!account.email || account.disabled) return; const email = account.email.toLowerCase(); const previous = values.get(email); values.set(email, { email, label: account.displayName ? `${account.displayName} · ${email}` : email, subscribed: previous?.subscribed ?? false, verified: account.emailVerified }) })
-    return [...values.values()].filter((person) => draft.purpose === 'service' ? person.verified || person.subscribed : person.subscribed)
-  }, [accounts, draft.purpose, subscribers])
-  const filteredCandidates = candidates.filter((person) => person.label.toLowerCase().includes(recipientSearch.toLowerCase()))
   const recipientCount = draft.audience === 'mailing_list' ? workspace.audienceCounts.mailingList : draft.audience === 'all_accounts' ? workspace.audienceCounts.verifiedAccounts : draft.recipientEmails.length
   const validation = validateCampaignDraft(draft)
+
+  const loadMoreAudience = async () => {
+    if (!audienceCursor || audienceLoading) return
+    setAudienceLoading(true); setAudienceError('')
+    try {
+      const page = await searchEmailCampaignAudience({ query: recipientSearch, purpose: draft.purpose, cursor: audienceCursor, pageSize: 50 })
+      setAudienceCandidates((current) => [...new Map([...current, ...page.candidates].map((person) => [person.email, person])).values()])
+      setAudienceCursor(page.nextCursor)
+    } catch (value) { setAudienceError(value instanceof Error ? value.message : 'More recipients could not be loaded.') }
+    finally { setAudienceLoading(false) }
+  }
 
   const uploadImage = async (file: File) => {
     if (!selected) return
@@ -232,27 +256,46 @@ export function CampaignStudio({ initial, workspace, onClose, onChanged }: { ini
     catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : 'The image could not be uploaded.') }
     finally { setWorking('') }
   }
-  const sendTest = async () => {
-    if (validation) { setError(validation); return }
+  const sendTest = async (afterReauthentication = false): Promise<boolean> => {
+    if (validation) { setError(validation); return false }
     setWorking('test'); setError('')
-    try { await sendEmailCampaignTest(draft); setNotice('Test email accepted by the provider.'); await onChanged() }
-    catch (testError) { setError(testError instanceof Error ? testError.message : 'The test could not be sent.') }
+    try { await sendEmailCampaignTest(draft); setNotice('Test email accepted by the provider.'); await onChanged(); return true }
+    catch (testError) {
+      if (!afterReauthentication && requiresRecentAuthentication(testError)) {
+        pendingEmailActionRef.current = () => sendTest(true)
+        setReauthOpen(true)
+      } else setError(testError instanceof Error ? testError.message : 'The test could not be sent.')
+      return false
+    }
     finally { setWorking('') }
   }
-  const sendCampaign = async () => {
-    const mode = confirmSend; if (!mode) return
-    if (mode === 'schedule' && !scheduleAt) { setError('Choose a date and time.'); setConfirmSend(''); return }
+  const sendCampaign = async (mode = confirmSend, requestedScheduleAt = scheduleAt, afterReauthentication = false): Promise<boolean> => {
+    if (!mode) return false
+    if (mode === 'schedule' && !requestedScheduleAt) { setError('Choose a date and time.'); setConfirmSend(''); return false }
     setWorking(mode); setError('')
-    try { const saved = await persist(true); if (!saved) return; await queueEmailCampaign(saved.id, mode, mode === 'schedule' ? new Date(scheduleAt).toISOString() : undefined); await onChanged(); onClose() }
-    catch (sendError) { setError(sendError instanceof Error ? sendError.message : 'The campaign could not be queued.') }
+    try { const saved = await persist(true); if (!saved) return false; await queueEmailCampaign(saved.id, mode, mode === 'schedule' ? new Date(requestedScheduleAt).toISOString() : undefined); await onChanged(); onClose(); return true }
+    catch (sendError) {
+      if (!afterReauthentication && requiresRecentAuthentication(sendError)) {
+        pendingEmailActionRef.current = () => sendCampaign(mode, requestedScheduleAt, true)
+        setReauthOpen(true)
+      } else setError(sendError instanceof Error ? sendError.message : 'The campaign could not be queued.')
+      return false
+    }
     finally { setWorking(''); setConfirmSend('') }
+  }
+  const completeReauthentication = async () => {
+    const action = pendingEmailActionRef.current
+    if (!action) { setReauthOpen(false); return }
+    await action()
+    pendingEmailActionRef.current = null
+    setReauthOpen(false)
   }
 
   const stageOrder: Stage[] = ['design', 'audience', 'review']
   const stageButton = (value: Stage, label: string, number: number) => <button className={stage === value ? 'active' : ''} onClick={() => setStage(value)}><span>{stageOrder.indexOf(stage) > stageOrder.indexOf(value) ? <Check /> : number}</span>{label}</button>
   return <div className="campaign-studio">
     <header className="campaign-studio-toolbar">
-      <button className="campaign-icon-button back" aria-label="Back to campaigns" onClick={() => { if (!dirty || window.confirm('Leave before the latest changes are saved?')) onClose() }}><ArrowLeft /></button>
+      <button className="campaign-icon-button back" aria-label="Back to campaigns" onClick={() => { if (!dirty || window.confirm('Leave before the latest changes are saved?')) { allowNextNavigation(); onClose() } }}><ArrowLeft /></button>
       <label className="campaign-name-field"><span>Campaign name</span><input value={draft.name} placeholder="Untitled campaign" maxLength={120} onChange={(event) => commit((current) => ({ ...current, name: event.target.value }))} /></label>
       <div className={`campaign-save-state ${saveState}`} aria-live="polite"><span />{saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? 'All changes saved' : saveState === 'failed' ? 'Save failed' : 'Unsaved changes'}</div>
       <div className="campaign-toolbar-group"><button aria-label="Undo" disabled={!history.past.length} onClick={undo}><Undo2 /></button><button aria-label="Redo" disabled={!history.future.length} onClick={redo}><Redo2 /></button></div>
@@ -273,10 +316,11 @@ export function CampaignStudio({ initial, workspace, onClose, onChanged }: { ini
       </div><DragOverlay>{activeId ? <div className="campaign-drag-overlay"><GripVertical />{activeId.startsWith('palette:') ? blockMeta[activeId.slice(8) as EmailCampaignBlockType].label : blockMeta[findBlock(draft.blocks, activeId)?.type ?? 'paragraph'].label}</div> : null}</DragOverlay>
     </DndContext>}
 
-    {stage === 'audience' && <div className="campaign-details-stage"><section className="campaign-details-main"><div className="campaign-form-card"><p className="eyebrow">Inbox details</p><h2>How should this arrive?</h2><Field label="Internal campaign name" hint="Only administrators see this" wide><input maxLength={120} value={draft.name} onChange={(event) => commit((current) => ({ ...current, name: event.target.value }))} /></Field><Field label="Email subject" wide><input maxLength={140} value={draft.subject} onChange={(event) => commit((current) => ({ ...current, subject: event.target.value }))} /></Field><Field label="Inbox preview" wide><input maxLength={180} value={draft.previewText} onChange={(event) => commit((current) => ({ ...current, previewText: event.target.value }))} /></Field></div><div className="campaign-form-card"><p className="eyebrow">Purpose</p><h2>Classify this message</h2><div className="campaign-choice-grid"><button className={draft.purpose === 'marketing' ? 'selected' : ''} onClick={() => commit((current) => ({ ...current, purpose: 'marketing', audience: current.audience === 'all_accounts' ? 'mailing_list' : current.audience, recipientEmails: [] }))}><Mail /><strong>Marketing update</strong><small>For people who explicitly asked to hear from Doxa.</small></button><button className={draft.purpose === 'service' ? 'selected' : ''} onClick={() => commit((current) => ({ ...current, purpose: 'service', recipientEmails: [] }))}><Users /><strong>Service message</strong><small>Necessary account or order information only.</small></button></div></div><div className="campaign-form-card"><p className="eyebrow">Audience</p><h2>Choose recipients</h2><div className="campaign-choice-grid three"><button className={draft.audience === 'mailing_list' ? 'selected' : ''} onClick={() => commit((current) => ({ ...current, audience: 'mailing_list', recipientEmails: [] }))}><Users /><strong>Mailing list</strong><small>{workspace.audienceCounts.mailingList} confirmed</small></button><button disabled={draft.purpose !== 'service'} className={draft.audience === 'all_accounts' ? 'selected' : ''} onClick={() => commit((current) => ({ ...current, audience: 'all_accounts', recipientEmails: [] }))}><Users /><strong>Website accounts</strong><small>{draft.purpose === 'service' ? `${workspace.audienceCounts.verifiedAccounts} verified` : 'Service only'}</small></button><button className={draft.audience === 'individuals' ? 'selected' : ''} onClick={() => commit((current) => ({ ...current, audience: 'individuals' }))}><Users /><strong>Individuals</strong><small>{draft.recipientEmails.length} selected</small></button></div>{draft.audience === 'individuals' && <div className="campaign-recipient-picker"><SearchField value={recipientSearch} onChange={setRecipientSearch} placeholder="Search eligible people…" /><div>{filteredCandidates.map((person) => <label key={person.email}><input type="checkbox" checked={draft.recipientEmails.includes(person.email)} onChange={(event) => commit((current) => ({ ...current, recipientEmails: event.target.checked ? [...new Set([...current.recipientEmails, person.email])].slice(0, 250) : current.recipientEmails.filter((email) => email !== person.email) }))} /><span><strong>{person.label}</strong><small>{person.subscribed ? 'Confirmed subscriber' : 'Verified account'}</small></span></label>)}</div></div>}</div></section><aside className="campaign-audience-summary"><p className="eyebrow">Live audience</p><strong>{recipientCount}</strong><span>currently eligible recipient{recipientCount === 1 ? '' : 's'}</span><small>Eligibility and consent are checked again by the server at send time.</small><button className="campaign-toolbar-action primary" onClick={() => { void persist(false); setStage('review') }}>Review campaign <ChevronRight /></button></aside></div>}
+    {stage === 'audience' && <div className="campaign-details-stage"><section className="campaign-details-main"><div className="campaign-form-card"><p className="eyebrow">Inbox details</p><h2>How should this arrive?</h2><Field label="Internal campaign name" hint="Only administrators see this" wide><input maxLength={120} value={draft.name} onChange={(event) => commit((current) => ({ ...current, name: event.target.value }))} /></Field><Field label="Email subject" wide><input maxLength={140} value={draft.subject} onChange={(event) => commit((current) => ({ ...current, subject: event.target.value }))} /></Field><Field label="Inbox preview" wide><input maxLength={180} value={draft.previewText} onChange={(event) => commit((current) => ({ ...current, previewText: event.target.value }))} /></Field></div><div className="campaign-form-card"><p className="eyebrow">Purpose</p><h2>Classify this message</h2><div className="campaign-choice-grid"><button className={draft.purpose === 'marketing' ? 'selected' : ''} onClick={() => commit((current) => ({ ...current, purpose: 'marketing', audience: current.audience === 'all_accounts' ? 'mailing_list' : current.audience, recipientEmails: [] }))}><Mail /><strong>Marketing update</strong><small>For people who explicitly asked to hear from Doxa.</small></button><button className={draft.purpose === 'service' ? 'selected' : ''} onClick={() => commit((current) => ({ ...current, purpose: 'service', recipientEmails: [] }))}><Users /><strong>Service message</strong><small>Necessary account or order information only.</small></button></div></div><div className="campaign-form-card"><p className="eyebrow">Audience</p><h2>Choose recipients</h2><div className="campaign-choice-grid three"><button className={draft.audience === 'mailing_list' ? 'selected' : ''} onClick={() => commit((current) => ({ ...current, audience: 'mailing_list', recipientEmails: [] }))}><Users /><strong>Mailing list</strong><small>{workspace.audienceCounts.mailingList} confirmed</small></button><button disabled={draft.purpose !== 'service'} className={draft.audience === 'all_accounts' ? 'selected' : ''} onClick={() => commit((current) => ({ ...current, audience: 'all_accounts', recipientEmails: [] }))}><Users /><strong>Website accounts</strong><small>{draft.purpose === 'service' ? `${workspace.audienceCounts.verifiedAccounts} verified` : 'Service only'}</small></button><button className={draft.audience === 'individuals' ? 'selected' : ''} onClick={() => commit((current) => ({ ...current, audience: 'individuals' }))}><Users /><strong>Individuals</strong><small>{draft.recipientEmails.length} selected</small></button></div>{draft.audience === 'individuals' && <div className="campaign-recipient-picker"><SearchField value={recipientSearch} onChange={setRecipientSearch} placeholder="Search eligible people…" />{audienceError && <p className="form-status error" role="alert">{audienceError} <button type="button" onClick={() => setAudienceRequestVersion((current) => current + 1)}>Try again</button></p>}{audienceLoading && !audienceCandidates.length && <p className="field-help" role="status">Loading eligible people…</p>}<div>{audienceCandidates.map((person) => <label key={person.email}><input type="checkbox" checked={draft.recipientEmails.includes(person.email)} onChange={(event) => commit((current) => ({ ...current, recipientEmails: event.target.checked ? [...new Set([...current.recipientEmails, person.email])].slice(0, 250) : current.recipientEmails.filter((email) => email !== person.email) }))} /><span><strong>{person.label}</strong><small>{person.subscribed ? 'Confirmed subscriber' : 'Verified account'}</small></span></label>)}</div>{audienceCursor && <button className="button secondary grow" type="button" disabled={audienceLoading} onClick={() => void loadMoreAudience()}>{audienceLoading ? 'Loading…' : 'Load more people'}</button>}</div>}</div></section><aside className="campaign-audience-summary"><p className="eyebrow">Live audience</p><strong>{recipientCount}</strong><span>currently eligible recipient{recipientCount === 1 ? '' : 's'}</span><small>Eligibility and consent are checked again by the server at send time.</small><button className="campaign-toolbar-action primary" onClick={() => { void persist(false); setStage('review') }}>Review campaign <ChevronRight /></button></aside></div>}
 
     {stage === 'review' && <div className="campaign-review-stage"><section className="campaign-review-card"><p className="eyebrow">Final review</p><h1>{validation ? 'A few details need attention' : 'Ready when you are'}</h1><dl><div><dt>Campaign</dt><dd>{draft.name || 'Not named'}</dd></div><div><dt>Subject</dt><dd>{draft.subject || 'No subject'}</dd></div><div><dt>Purpose</dt><dd>{draft.purpose === 'marketing' ? 'Marketing update' : 'Service message'}</dd></div><div><dt>Audience</dt><dd>{draft.audience === 'mailing_list' ? 'Confirmed mailing list' : draft.audience === 'all_accounts' ? 'Verified website accounts' : `${draft.recipientEmails.length} selected people`}</dd></div><div><dt>Eligible now</dt><dd>{recipientCount}</dd></div></dl>{validation && <button className="campaign-review-warning" onClick={() => setStage(validation.includes('recipient') || validation.includes('campaign name') || validation.includes('subject') ? 'audience' : 'design')}><span>Not ready to send</span><strong>{validation}</strong><ChevronRight /></button>}<div className="campaign-send-actions"><button disabled={Boolean(validation) || !workspace.configured || !recipientCount || Boolean(working)} onClick={() => setConfirmSend('send_now')}><Send />Send now</button><div><label><CalendarClock /> Schedule<input type="datetime-local" value={scheduleAt} onChange={(event) => setScheduleAt(event.target.value)} /></label><button disabled={Boolean(validation) || !workspace.configured || !recipientCount || !scheduleAt || Boolean(working)} onClick={() => setConfirmSend('schedule')}>Schedule</button></div></div></section><aside className="campaign-review-preview"><DndContext sensors={[]}><div className="campaign-email-shell desktop"><div className="campaign-email-inbox"><small>FROM · Doxa Cards</small><strong>{draft.subject || 'Your subject line'}</strong><span>{draft.previewText || 'Inbox preview text'}</span></div><div className="campaign-email-brand">Doxa <span>Treasury</span></div><DropColumn parentId={null} columnIndex={null} blocks={draft.blocks} selectedId="" onSelect={() => undefined} onUpdate={() => undefined} onDelete={() => undefined} onDuplicate={() => undefined} /></div></DndContext></aside></div>}
     <ConfirmDialog open={Boolean(confirmSend)} title={confirmSend === 'schedule' ? 'Schedule this campaign?' : 'Send this campaign now?'} description={confirmSend === 'schedule' ? `The campaign will be prepared for ${recipientCount} currently eligible recipient(s) at the selected time.` : `The campaign will be prepared for ${recipientCount} currently eligible recipient(s). Provider acceptance is not the same as confirmed delivery.`} confirmLabel={confirmSend === 'schedule' ? 'Schedule campaign' : 'Send campaign'} busy={working === confirmSend} onCancel={() => setConfirmSend('')} onConfirm={() => void sendCampaign()} />
+    <AdminReauthenticationDialog open={reauthOpen} actionLabel="Confirm your identity to send, schedule or test this campaign." onCancel={() => { pendingEmailActionRef.current = null; setReauthOpen(false) }} onAuthenticated={completeReauthentication} />
   </div>
 }
 

@@ -48,6 +48,8 @@ vi.mock('../src/lib/data', () => ({
   updateOrderStatus: vi.fn().mockResolvedValue(undefined),
   dismissTestOrder: vi.fn().mockResolvedValue({ dismissed: true }),
   listJournalArticlesAdmin: vi.fn().mockResolvedValue([]),
+  listJournalArticlesAdminPage: vi.fn().mockResolvedValue({ articles: [], nextCursor: null, counts: { draft: 0, published: 0 } }),
+  getJournalArticleAdmin: vi.fn().mockResolvedValue(null),
   saveJournalArticle: vi.fn(),
   publishJournalArticle: vi.fn(),
   retryJournalNotification: vi.fn(),

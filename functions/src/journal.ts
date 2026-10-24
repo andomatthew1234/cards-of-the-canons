@@ -32,6 +32,10 @@ const articleFields = z.object({
 const articleId = z.object({ articleId: z.string().regex(/^[a-zA-Z0-9_-]{10,80}$/) }).strict()
 const deleteInput = articleId.extend({ revision: z.number().int().nonnegative() }).strict()
 const publishInput = articleFields.extend({ sendNotification: z.boolean().default(true) }).strict()
+const listInput = z.object({
+  cursor: z.string().regex(/^[a-zA-Z0-9_-]{10,80}$/).optional(),
+  pageSize: z.number().int().min(1).max(50).default(30),
+}).strict()
 
 function iso(value: unknown) {
   return value instanceof Timestamp ? value.toDate().toISOString() : null
@@ -44,10 +48,23 @@ function forClient(document: FirebaseFirestore.DocumentSnapshot) {
     excerpt: String(data.excerpt ?? ''), bodyMarkdown: String(data.bodyMarkdown ?? ''), category: String(data.category ?? ''),
     coverImageUrl: String(data.coverImageUrl ?? ''), coverImageAlt: String(data.coverImageAlt ?? ''), authorName: String(data.authorName ?? 'Doxa Treasury'),
     seoTitle: String(data.seoTitle ?? ''), seoDescription: String(data.seoDescription ?? ''), featured: data.featured === true,
-    status: data.status === 'published' ? 'published' : 'draft', createdAt: iso(data.createdAt), updatedAt: iso(data.updatedAt), publishedAt: iso(data.publishedAt),
+    status: data.status === 'published' ? 'published' : data.status === 'archived' ? 'archived' : 'draft', createdAt: iso(data.createdAt), updatedAt: iso(data.updatedAt), publishedAt: iso(data.publishedAt),
     notificationStatus: String(data.notificationStatus ?? 'not_requested'), notificationAudienceCount: Number(data.notificationAudienceCount ?? 0),
     notificationError: typeof data.notificationError === 'string' ? data.notificationError : null,
   }
+}
+
+export function assertJournalMutationAllowed(
+  currentRevision: number,
+  requestedRevision: number,
+  status: unknown,
+  mode: 'save' | 'publish',
+) {
+  if (currentRevision !== requestedRevision) {
+    throw new HttpsError('aborted', `This entry changed elsewhere. Reload it before ${mode === 'save' ? 'saving again' : 'publishing'}.`)
+  }
+  if (status === 'archived') throw new HttpsError('failed-precondition', 'This Journal entry was archived and cannot be changed or republished.')
+  if (mode === 'save' && status === 'published') throw new HttpsError('failed-precondition', 'Use Publish changes to update a live Journal entry.')
 }
 
 async function assertUniqueSlug(articleIdValue: string, slugValue: string) {
@@ -57,8 +74,38 @@ async function assertUniqueSlug(articleIdValue: string, slugValue: string) {
 
 export const listJournalArticlesAdmin = onCall(protectedOptions, async (request) => {
   await requireAdminContext(request as CallableRequestLike)
-  const snapshot = await db.collection('articles').orderBy('updatedAt', 'desc').limit(100).get()
-  return { articles: snapshot.docs.map(forClient) }
+  const parsed = listInput.safeParse(request.data ?? {})
+  if (!parsed.success) throw new HttpsError('invalid-argument', 'Choose a valid Journal page.')
+  let pageQuery: FirebaseFirestore.Query = db.collection('articles')
+    .where('status', 'in', ['draft', 'published'])
+    .orderBy('updatedAt', 'desc')
+  if (parsed.data.cursor) {
+    const cursor = await db.collection('articles').doc(parsed.data.cursor).get()
+    if (!cursor.exists || !['draft', 'published'].includes(String(cursor.data()?.status))) {
+      throw new HttpsError('failed-precondition', 'This Journal page changed. Refresh the list and try again.')
+    }
+    pageQuery = pageQuery.startAfter(cursor)
+  }
+  const [snapshot, draftCount, publishedCount] = await Promise.all([
+    pageQuery.limit(parsed.data.pageSize + 1).get(),
+    db.collection('articles').where('status', '==', 'draft').count().get(),
+    db.collection('articles').where('status', '==', 'published').count().get(),
+  ])
+  const visible = snapshot.docs.slice(0, parsed.data.pageSize)
+  return {
+    articles: visible.map(forClient),
+    nextCursor: snapshot.docs.length > parsed.data.pageSize ? visible.at(-1)?.id ?? null : null,
+    counts: { draft: draftCount.data().count, published: publishedCount.data().count },
+  }
+})
+
+export const getJournalArticleAdmin = onCall(protectedOptions, async (request) => {
+  await requireAdminContext(request as CallableRequestLike)
+  const parsed = articleId.safeParse(request.data)
+  if (!parsed.success) throw new HttpsError('invalid-argument', 'Choose a valid Journal entry.')
+  const snapshot = await db.collection('articles').doc(parsed.data.articleId).get()
+  if (!snapshot.exists || snapshot.data()?.status === 'archived') return { article: null }
+  return { article: forClient(snapshot) }
 })
 
 export const saveJournalArticle = onCall(protectedOptions, async (request) => {
@@ -72,8 +119,7 @@ export const saveJournalArticle = onCall(protectedOptions, async (request) => {
   await db.runTransaction(async (transaction) => {
     const existing = await transaction.get(ref)
     const currentRevision = Number(existing.data()?.revision ?? 0)
-    if (existing.exists && currentRevision !== parsed.data.revision) throw new HttpsError('aborted', 'This entry changed elsewhere. Reload it before saving again.')
-    if (existing.data()?.status === 'published') throw new HttpsError('failed-precondition', 'Use Publish changes to update a live Journal entry.')
+    if (existing.exists) assertJournalMutationAllowed(currentRevision, parsed.data.revision, existing.data()?.status, 'save')
     const { id: _id, revision: _revision, ...fields } = parsed.data
     transaction.set(ref, {
       ...fields, status: 'draft', revision: currentRevision + 1,
@@ -98,7 +144,7 @@ export const publishJournalArticle = onCall(providerOptions, async (request) => 
   const publication = await db.runTransaction(async (transaction) => {
     const existing = await transaction.get(ref)
     const currentRevision = Number(existing.data()?.revision ?? 0)
-    if (existing.exists && currentRevision !== parsed.data.revision) throw new HttpsError('aborted', 'This entry changed elsewhere. Reload it before publishing.')
+    if (existing.exists) assertJournalMutationAllowed(currentRevision, parsed.data.revision, existing.data()?.status, 'publish')
     const firstPublication = existing.data()?.status !== 'published'
     const nextRevision = currentRevision + 1
     const campaignId = `journal_${id}_${nextRevision}`.slice(0, 80)
@@ -131,19 +177,32 @@ export const publishJournalArticle = onCall(providerOptions, async (request) => 
 })
 
 export const deleteJournalArticle = onCall(protectedOptions, async (request) => {
-  await requireAdminContext(request as CallableRequestLike)
+  const caller = await authorizeRequest(request as CallableRequestLike, {
+    requireAdmin: true,
+    requireVerifiedEmail: true,
+    requireRecentAuthSeconds: ADMIN_RECENT_AUTH_SECONDS,
+  })
   const parsed = deleteInput.safeParse(request.data)
   if (!parsed.success) throw new HttpsError('invalid-argument', 'Choose a valid Journal entry.')
   const ref = db.collection('articles').doc(parsed.data.articleId)
-  await db.runTransaction(async (transaction) => {
+  const result = await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref)
-    if (!snapshot.exists) return
+    if (!snapshot.exists) return 'missing' as const
     if (Number(snapshot.data()?.revision ?? 0) !== parsed.data.revision) {
       throw new HttpsError('aborted', 'This entry changed elsewhere. Reload it before deleting it.')
     }
+    if (snapshot.data()?.status === 'published') {
+      transaction.update(ref, {
+        status: 'archived', archivedAt: Timestamp.now(), archivedBy: caller.uid,
+        revision: Number(snapshot.data()?.revision ?? 0) + 1,
+        updatedAt: Timestamp.now(), updatedBy: caller.uid,
+      })
+      return 'archived' as const
+    }
     transaction.delete(ref)
+    return 'deleted' as const
   })
-  return { deleted: true }
+  return { deleted: result !== 'missing', archived: result === 'archived' }
 })
 
 export const retryJournalNotification = onCall(providerOptions, async (request) => {
