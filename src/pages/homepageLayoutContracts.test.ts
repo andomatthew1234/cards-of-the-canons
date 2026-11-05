@@ -186,6 +186,12 @@ describe('homepage layout contracts', () => {
     expect(homeSource).not.toContain('home-product-page')
   })
 
+  it('overlaps adjacent homepage sections by one pixel so compositing cannot expose white seams', () => {
+    const seamRule = css.match(/\.home-shell\s*>\s*section\s*\+\s*section\s*\{([^}]*)\}/)?.[1] ?? ''
+
+    expect(seamRule).toContain('margin-top: -1px')
+  })
+
   it('lengthens the Journal image currently crossing the viewport focus line', () => {
     const imageRule = css.match(/(?:^|\n)\.journal-card-image\s*\{([^}]*)\}/)?.[1] ?? ''
     const imageContentRule = css.match(/(?:^|\n)\.journal-card-image img\s*\{([^}]*)\}/)?.[1] ?? ''

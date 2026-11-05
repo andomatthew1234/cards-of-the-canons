@@ -9,6 +9,13 @@
     linear-gradient(90deg, rgba(18, 9, 7, 0.2), transparent 42%, rgba(18, 9, 7, 0.18));
 }
 
+/* Full-bleed chapters can expose the page background through a fractional
+   device-pixel seam on mobile GPUs. A one-pixel overlap keeps the intended
+   neighbouring backgrounds touching without changing any chapter's layout. */
+.home-shell > section + section {
+  margin-top: -1px;
+}
+
 /*
  * The hero and introduction share #372322 at their touching edges. Fade the
  * multiply-blended paper texture in below the fold so it cannot darken the

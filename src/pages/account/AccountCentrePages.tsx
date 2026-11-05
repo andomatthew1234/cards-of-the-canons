@@ -120,6 +120,25 @@ export function AccountOverview() {
   return <AccountCentreShell title={`Welcome, ${name.split(' ')[0]}`} eyebrow="Overview" description="A clear view of your account, recent purchases and community activity.">
     {errors.profile && <AccountRequestError message={errors.profile} onRetry={retry} />}
     <div className="account-overview-dashboard" aria-busy={loading}>
+      {!loading && <AccountPanel title="Digital Treasury" description="See your revealed Saints and the collection still waiting to be discovered." className="account-summary-panel account-overview-treasury" ariaLabel="Digital Treasury overview">
+        {errors.treasury ? <AccountRequestError message={errors.treasury} onRetry={retry} /> : <>
+          <div className="account-treasury-summary">
+            <div className="account-treasury-completion"><strong>{treasuryCompletion}%</strong><span>{uniqueCollected} of {totalAvailable} unique Saints revealed</span></div>
+            <div className="account-treasury-progress" role="progressbar" aria-label="Treasury collection completion" aria-valuemin={0} aria-valuemax={100} aria-valuenow={treasuryCompletion}><i style={{ width: `${treasuryCompletion}%` }} /></div>
+          </div>
+          {treasuryCards.length ? <ul className="account-treasury-rail" aria-label="Twelve potential Saint unlocks">
+            {treasuryCards.map((card) => <li key={card.id} className={card.collected ? 'revealed' : 'locked'}>
+              <div className="account-treasury-card-art">
+                {card.collected && card.imageUrl ? <img src={card.imageUrl} alt={card.imageAlt || card.title} loading="lazy" /> : <LockKeyhole aria-hidden="true" />}
+              </div>
+              <strong>{card.collected ? card.title : 'Locked Saint'}</strong>
+              <small>{card.collected ? `${card.quantity || 1} ${card.quantity === 1 ? 'copy' : 'copies'}` : `Card ${card.number}`}</small>
+            </li>)}
+          </ul> : <div className="account-treasury-empty"><LockKeyhole aria-hidden="true" /><p>Your first collection will appear here when its Saints are published.</p></div>}
+        </>}
+        <AccountTextLink to="/account/treasury">Open My Treasury</AccountTextLink>
+      </AccountPanel>}
+
       <AccountPanel title="Orders & purchases" description="Your most recent purchase activity." className="account-summary-panel account-overview-orders">
         {errors.orders ? <AccountRequestError message={errors.orders} onRetry={retry} /> : orders[0] ? <div className="account-overview-order-tile"><Package aria-hidden="true" /><div><strong>Order #{orders[0].id}</strong><p>{orders[0].items.length} item line{orders[0].items.length === 1 ? '' : 's'}</p></div><span>{formatMoney(orders[0].totalCents, orders[0].currency)}</span></div> : <div className="account-overview-empty"><ShoppingBag aria-hidden="true" /><p>No purchases yet.</p></div>}
         <AccountTextLink to="/account/orders">View orders & purchases</AccountTextLink>
@@ -144,24 +163,6 @@ export function AccountOverview() {
         <AccountTextLink to="/account/security">Open security checkup</AccountTextLink>
       </AccountPanel>
 
-      {!loading && <AccountPanel title="Digital Treasury" description="See your revealed Saints and the collection still waiting to be discovered." className="account-summary-panel account-overview-treasury" ariaLabel="Digital Treasury overview">
-        {errors.treasury ? <AccountRequestError message={errors.treasury} onRetry={retry} /> : <>
-          <div className="account-treasury-summary">
-            <div className="account-treasury-completion"><strong>{treasuryCompletion}%</strong><span>{uniqueCollected} of {totalAvailable} unique Saints revealed</span></div>
-            <div className="account-treasury-progress" role="progressbar" aria-label="Treasury collection completion" aria-valuemin={0} aria-valuemax={100} aria-valuenow={treasuryCompletion}><i style={{ width: `${treasuryCompletion}%` }} /></div>
-          </div>
-          {treasuryCards.length ? <ul className="account-treasury-rail" aria-label="Twelve potential Saint unlocks">
-            {treasuryCards.map((card) => <li key={card.id} className={card.collected ? 'revealed' : 'locked'}>
-              <div className="account-treasury-card-art">
-                {card.collected && card.imageUrl ? <img src={card.imageUrl} alt={card.imageAlt || card.title} loading="lazy" /> : <LockKeyhole aria-hidden="true" />}
-              </div>
-              <strong>{card.collected ? card.title : 'Locked Saint'}</strong>
-              <small>{card.collected ? `${card.quantity || 1} ${card.quantity === 1 ? 'copy' : 'copies'}` : `Card ${card.number}`}</small>
-            </li>)}
-          </ul> : <div className="account-treasury-empty"><LockKeyhole aria-hidden="true" /><p>Your first collection will appear here when its Saints are published.</p></div>}
-        </>}
-        <AccountTextLink to="/account/treasury">Open My Treasury</AccountTextLink>
-      </AccountPanel>}
     </div>
   </AccountCentreShell>
 }

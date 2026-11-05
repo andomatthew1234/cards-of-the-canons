@@ -185,6 +185,9 @@ describe('routed Account Centre', () => {
     render(<MemoryRouter initialEntries={['/account']}><AccountOverview /></MemoryRouter>)
 
     const treasuryPanel = await screen.findByRole('region', { name: 'Digital Treasury overview' })
+    const securityPanel = screen.getByRole('heading', { name: 'Security checkup' }).closest('section')
+    expect(securityPanel).not.toBeNull()
+    expect(treasuryPanel.compareDocumentPosition(securityPanel as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(treasuryPanel).toHaveClass('account-overview-treasury')
     expect(treasuryPanel).toHaveTextContent('17%')
     expect(treasuryPanel).toHaveTextContent('2 of 12 unique Saints revealed')
