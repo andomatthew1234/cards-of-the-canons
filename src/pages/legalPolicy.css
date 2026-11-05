@@ -92,6 +92,20 @@
   justify-content: center;
 }
 
+.legal-policy-loading {
+  min-height: min(32rem, 70svh);
+  display: grid;
+  place-items: center;
+}
+
+.legal-policy-content.markdown-content {
+  display: block;
+}
+
+.legal-policy-content.markdown-content > * + * {
+  margin-top: 1.15rem;
+}
+
 .legal-policy-unavailable > svg {
   width: 2.5rem;
   height: 2.5rem;

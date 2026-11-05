@@ -1,9 +1,25 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { assertJournalMutationAllowed } from './journal'
+import { assertJournalMutationAllowed, journalBodyPreview } from './journal'
 
 describe('Journal deletion contract', () => {
+  it('creates a safe body-text preview for release emails without cutting words', () => {
+    const preview = journalBodyPreview(
+      '## A beginning\n\n**Beauty** points toward [the Divine](https://example.com), and the Church preserves this inheritance for every generation. More words follow.',
+      'Fallback introduction for the story.',
+    )
+
+    expect(preview).toBe('A beginning Beauty points toward the Divine, and the Church preserves this inheritance for every…')
+    expect(preview).not.toMatch(/[#*_[\]()`<>]/)
+    expect(preview.length).toBeLessThanOrEqual(101)
+  })
+
+  it('falls back to the excerpt when the body has no usable prose', () => {
+    expect(journalBodyPreview('```ts\nconst hidden = true\n```', 'A clear introduction to the newest Journal story.'))
+      .toBe('A clear introduction to the newest Journal story.')
+  })
+
   it('paginates the admin archive and provides a direct ID lookup', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/journal.ts'), 'utf8')
     const listing = source.slice(source.indexOf('export const listJournalArticlesAdmin'), source.indexOf('export const saveJournalArticle'))

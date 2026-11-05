@@ -45,6 +45,21 @@ const testCheckoutTesterUids = defineString('TEST_CHECKOUT_TESTER_UIDS', { defau
 const testCheckoutPerUserQuota = defineString('TEST_CHECKOUT_PER_USER_QUOTA', { default: '3' })
 const testCheckoutGlobalQuota = defineString('TEST_CHECKOUT_GLOBAL_QUOTA', { default: '25' })
 const checkoutExpirySeconds = 30 * 60
+
+export function checkoutAutofillEnabledFromProfile(profile: unknown) {
+  if (!profile || typeof profile !== 'object') return true
+  const preferences = (profile as Record<string, unknown>).preferences
+  return !(preferences && typeof preferences === 'object'
+    && (preferences as Record<string, unknown>).checkoutAndEnquiryAutofill === false)
+}
+
+export function stripeCustomerEmail(
+  persisted: { customerEmail?: unknown } | null | undefined,
+  fallbackCustomerEmail: unknown,
+) {
+  const value = persisted ? persisted.customerEmail : fallbackCustomerEmail
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
 const creationLeaseMs = 60 * 1000
 const publicOrigins = new Set([
   'https://doxatreasury.com',
@@ -275,6 +290,7 @@ async function restoreReservedStock(
 async function reserveOrder(
   uid: string,
   email: string,
+  autofillCustomerEmail: boolean,
   orderId: string,
   items: Array<{ productId: string; quantity: number }>,
   paymentEnvironment: 'test' | 'live',
@@ -361,9 +377,19 @@ async function reserveOrder(
         quantity,
         lineTotalCents: priceCents * quantity,
         inventoryTracked,
+        treasuryCardsPerUnit: Number.isSafeInteger(product.treasuryCardsPerUnit) && product.treasuryCardsPerUnit >= 0 && product.treasuryCardsPerUnit <= 50
+          ? Number(product.treasuryCardsPerUnit)
+          : 0,
+        treasuryEligibleCodeCount: (Number.isSafeInteger(product.treasuryCardsPerUnit) && product.treasuryCardsPerUnit >= 0 && product.treasuryCardsPerUnit <= 50
+          ? Number(product.treasuryCardsPerUnit)
+          : 0) * quantity,
         productCreateTimeMillis: snapshot.createTime ? snapshot.createTime.toMillis() : null,
       }
     })
+    const treasuryEligibleCodeCount = snapshots.reduce((total, item) => total + item.treasuryEligibleCodeCount, 0)
+    if (!Number.isSafeInteger(treasuryEligibleCodeCount) || treasuryEligibleCodeCount > 50) {
+      throw new HttpsError('failed-precondition', 'This order contains too many Treasury cards for one checkout. Please split the order.')
+    }
     const subtotalCents = snapshots.reduce((total, item) => total + item.lineTotalCents, 0)
     if (!Number.isSafeInteger(subtotalCents) || subtotalCents < 1 || subtotalCents > 100_000_000) {
       throw new HttpsError('failed-precondition', 'The cart total is outside the supported range.')
@@ -382,7 +408,7 @@ async function reserveOrder(
     }
     const creationParams: PersistedCreationParams = {
       clientReferenceId: orderId,
-      customerEmail: email,
+      customerEmail: autofillCustomerEmail ? email : '',
       origin,
       integrationIdentifier: integrationIdentifier(),
       expiresAtSec: Math.floor(expiresAt.toMillis() / 1000),
@@ -408,6 +434,12 @@ async function reserveOrder(
       shippingCents: 0,
       totalCents: subtotalCents,
       items: snapshots,
+      treasuryEligibleCodeCount,
+      treasuryAssignedCodeCount: 0,
+      treasuryRedeemedCodeCount: 0,
+      treasuryFailedAttempts: 0,
+      treasuryAttemptLimit: 3,
+      treasuryLocked: false,
       expiresAt,
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
@@ -556,6 +588,12 @@ async function applyCheckoutEvent(
     }
     const next = reconcileOrderState(current, patch)
 
+    const recordsPurchase = next.status === 'paid' && current.status !== 'paid' && current.status !== 'fulfilled'
+    const activityRef = recordsPurchase ? activityEventRef(String(data.userId), `order_${orderId}`) : null
+    // Firestore requires every transaction read to happen before the first
+    // write. Read the optional activity record before stock/order mutations.
+    const existingActivity = activityRef ? await transaction.get(activityRef) : null
+
     let stockRestored = 0
     if (transition.action === 'release' && current.inventoryState === 'reserved') {
       const outcome = await restoreReservedStock(transaction, orderId, data)
@@ -576,16 +614,14 @@ async function applyCheckoutEvent(
       updatedAt: FieldValue.serverTimestamp(),
     })
 
-    if (next.status === 'paid' && current.status !== 'paid' && current.status !== 'fulfilled') {
-      const activityRef = activityEventRef(String(data.userId), `order_${orderId}`)
-      const existingActivity = await transaction.get(activityRef)
+    if (recordsPurchase && activityRef && existingActivity) {
       // Purchase activity is idempotent business state: an already-recorded
       // activity must never abort replay of a legitimate payment event, and
       // the event itself must still be durably recorded either way.
       if (shouldRecordPurchaseActivity({
         currentStatus: current.status,
         nextStatus: next.status,
-        activityExists: existingActivity.exists,
+          activityExists: existingActivity.exists,
       })) {
         const copy = activityCopy('order_purchased', `Order #${orderId} was completed.`)
         transaction.create(activityRef, activityDocument({
@@ -762,7 +798,9 @@ export const createCheckoutSession = onCall({
 
   const origin = safeOrigin(request.rawRequest.get('origin'))
   return coalesce(`create:${orderId}`, async () => {
-    const reserved = await reserveOrder(identity.uid, identity.email, orderId, parsed.data.items, paymentEnvironment, origin)
+    const profile = await db.collection('usersPrivate').doc(identity.uid).get()
+    const autofillCustomerEmail = checkoutAutofillEnabledFromProfile(profile.data())
+    const reserved = await reserveOrder(identity.uid, identity.email, autofillCustomerEmail, orderId, parsed.data.items, paymentEnvironment, origin)
     const client = stripeClient()
 
     if (reserved.cancelRequested) {
@@ -875,7 +913,7 @@ function replaySessionParams(orderId: string, data: DocumentData): Stripe.Checko
   return {
     mode: 'payment',
     client_reference_id: orderId,
-    customer_email: persisted?.customerEmail || String(data.customerEmail ?? '') || undefined,
+    customer_email: stripeCustomerEmail(persisted, data.customerEmail),
     integration_identifier: persisted?.integrationIdentifier ?? integrationIdentifier(),
     line_items: rawItems.map((line) => ({
       quantity: line.quantity,

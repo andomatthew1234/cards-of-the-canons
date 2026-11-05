@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { Contact } from '../src/pages/Contact'
 
-const { authState, saveEnquiry, trackEvent } = vi.hoisted(() => ({
+const { authState, getUserProfile, saveEnquiry, trackEvent } = vi.hoisted(() => ({
   authState: {
     user: null as null | {
       uid: string
@@ -14,11 +14,13 @@ const { authState, saveEnquiry, trackEvent } = vi.hoisted(() => ({
       providerData: Array<{ providerId: string }>
     },
   },
+  getUserProfile: vi.fn(),
   saveEnquiry: vi.fn(),
   trackEvent: vi.fn(),
 }))
 
 vi.mock('../src/context/AuthContext', () => ({ useAuth: () => authState }))
+vi.mock('../src/lib/accounts', () => ({ getUserProfile }))
 vi.mock('../src/lib/data', () => ({ saveEnquiry }))
 vi.mock('../src/lib/analytics', () => ({ trackEvent }))
 
@@ -29,6 +31,8 @@ function renderContact() {
 describe('contact enquiry form', () => {
   beforeEach(() => {
     authState.user = null
+    getUserProfile.mockReset()
+    getUserProfile.mockResolvedValue({ preferences: { checkoutAndEnquiryAutofill: true } })
     saveEnquiry.mockReset()
     trackEvent.mockReset()
   })
@@ -45,7 +49,7 @@ describe('contact enquiry form', () => {
     const user = userEvent.setup()
     renderContact()
 
-    expect(screen.getByText('Your account details will be included automatically when you submit this form.')).toBeInTheDocument()
+    expect(await screen.findByText('Your account details will be included automatically when you submit this form.')).toBeInTheDocument()
     expect(screen.queryByLabelText('Full name')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Email address')).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/Organisation/)).not.toBeInTheDocument()
@@ -74,7 +78,7 @@ describe('contact enquiry form', () => {
     const user = userEvent.setup()
     renderContact()
 
-    await user.click(screen.getByRole('button', { name: 'Enter different details' }))
+    await user.click(await screen.findByRole('button', { name: 'Enter different details' }))
 
     expect(screen.getByLabelText('Full name')).toHaveValue('Ada Account')
     expect(screen.getByLabelText('Email address')).toHaveValue('ada@example.com')

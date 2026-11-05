@@ -57,7 +57,7 @@ export const LEGAL_POLICIES: Readonly<Record<LegalPolicySlug, LegalPolicyRecord>
     }),
     terms: Object.freeze({
       slug: "terms",
-      navigationLabel: "Terms",
+      navigationLabel: "Terms and Conditions",
       status: "awaiting_approval",
     }),
     shipping: Object.freeze({

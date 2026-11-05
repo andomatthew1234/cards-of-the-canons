@@ -15,6 +15,58 @@ const imageUrl = z
     "Use an approved website image.",
   );
 const optionalImageUrl = z.union([z.literal(""), imageUrl]);
+const editorialPanel = z
+  .object({
+    title: text(160, 2),
+    body: text(2_000),
+    imageUrl: optionalImageUrl,
+    imageAlt: text(200),
+  })
+  .strict()
+  .superRefine((panel, context) => {
+    if (panel.imageUrl && !panel.imageAlt.trim())
+      context.addIssue({
+        code: "custom",
+        path: ["imageAlt"],
+        message: "Describe the panel image.",
+      });
+  });
+const councilEditorialPanel = z
+  .object({
+    title: text(160, 2),
+    body: text(2_000),
+    imageUrl: optionalImageUrl,
+    imageAlt: text(200),
+    quoteReference: text(120),
+    quote: text(1_000),
+  })
+  .strict()
+  .superRefine((panel, context) => {
+    if (panel.imageUrl && !panel.imageAlt.trim())
+      context.addIssue({
+        code: "custom",
+        path: ["imageAlt"],
+        message: "Describe the panel image.",
+      });
+  });
+const genesisEditorialPanel = z
+  .object({
+    title: text(160, 2),
+    body: text(2_000),
+    imageUrl: optionalImageUrl,
+    imageAlt: text(200),
+    quoteReference: text(120).default(""),
+    quote: text(1_000).default(""),
+  })
+  .strict()
+  .superRefine((panel, context) => {
+    if (panel.imageUrl && !panel.imageAlt.trim())
+      context.addIssue({
+        code: "custom",
+        path: ["imageAlt"],
+        message: "Describe the How It Began image.",
+      });
+  });
 function isSafeWebsiteDestination(value: string) {
   if (/^\/(?!\/)(?:[A-Za-z0-9][A-Za-z0-9/_-]*)?(?:#[A-Za-z][A-Za-z0-9_-]*)?$/.test(value))
     return true;
@@ -49,11 +101,21 @@ export const homeSectionsSchema = z
         accent: text(80),
         imageUrl,
         imageAlt: text(200, 2),
+        backImageUrl: optionalImageUrl.optional(),
+        backImageAlt: text(200).optional(),
         imageCredit: text(240),
         primaryActionLabel: text(60, 2),
         secondaryActionLabel: text(60, 2),
       })
-      .strict(),
+      .strict()
+      .superRefine((hero, context) => {
+        if (hero.backImageUrl && !hero.backImageAlt?.trim())
+          context.addIssue({
+            code: "custom",
+            path: ["backImageAlt"],
+            message: "Describe the display card back image.",
+          });
+      }),
     values: z
       .object({
         firstTitle: text(80, 2),
@@ -63,13 +125,37 @@ export const homeSectionsSchema = z
         thirdTitle: text(80, 2),
         thirdBody: text(160, 2),
         marquee: text(320, 2),
+        bubbles: z
+          .array(
+            z
+              .object({
+                id: text(64, 2),
+                title: text(80, 2),
+                    body: text(600),
+                imageUrl: optionalImageUrl,
+                imageAlt: text(200),
+              })
+              .strict()
+              .superRefine((bubble, context) => {
+                if (bubble.imageUrl && !bubble.imageAlt.trim())
+                  context.addIssue({
+                    code: "custom",
+                    path: ["imageAlt"],
+                    message: "Describe the information bubble background image.",
+                  });
+              }),
+          )
+          .min(1)
+          .max(12)
+          .optional(),
       })
       .strict(),
     featured: z
       .object({
-        eyebrow: text(80, 2),
-        title: text(160, 2),
-        body: text(1000, 2),
+        // The collection remains useful without introductory copy.
+        eyebrow: text(80),
+        title: text(160),
+        body: text(1000),
       })
       .strict(),
     story: z
@@ -90,6 +176,14 @@ export const homeSectionsSchema = z
         body: text(1000, 2),
       })
       .strict(),
+    editorial: z
+      .object({
+        council: councilEditorialPanel,
+        genesis: genesisEditorialPanel,
+        scriptorium: editorialPanel,
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -146,6 +240,10 @@ const aboutPageSchema = standardPageSchema
 
 const shopPageSchema = standardPageSchema
   .extend({
+    // Shop introduction copy is optional: product browsing remains useful on its own.
+    eyebrow: text(80),
+    title: text(160),
+    body: text(10000),
     categoryTitleTemplate: text(160, 2).refine(
       (value) => value.includes("{category}"),
       "Include {category} in the category title template.",
@@ -416,6 +514,60 @@ export const websiteContentSchema = z
 
 export type WebsiteContent = z.infer<typeof websiteContentSchema>;
 
+const defaultInformationBubbles: NonNullable<WebsiteContent["pages"]["home"]["sections"]["values"]["bubbles"]> = [
+  { id: "child-safety", title: "Tested for child safety", body: "", imageUrl: "", imageAlt: "" },
+  { id: "reverently-produced", title: "Reverently produced", body: "", imageUrl: "", imageAlt: "" },
+  { id: "no-ai", title: "No AI", body: "", imageUrl: "", imageAlt: "" },
+  { id: "no-artificial-scarcity", title: "No artificial scarcity", body: "", imageUrl: "", imageAlt: "" },
+  { id: "made-in-australia", title: "Made in Australia", body: "", imageUrl: "", imageAlt: "" },
+];
+
+export const defaultHomepageEditorialPanels: NonNullable<WebsiteContent["pages"]["home"]["sections"]["editorial"]> = {
+  council: {
+    title: "Join the Council",
+    body: "Fill out your digital collection, vote on new releases, give feedback, track your orders, and receive the latest news!",
+    quoteReference: "Matthew 18:20",
+    quote: "For where two or three are gathered together in My name, I am there in the midst of them.",
+    imageUrl: "/images/editorial/join-the-council.webp",
+    imageAlt: "Orthodox clergy gathered in a richly decorated church",
+  },
+  genesis: {
+    title: "How It Began",
+    body: "DoXa Treasury began at a vespers service in a regional Australian monastery, when a young convert saw Christ’s beauty and felt a deep conviction that it must be shared.\n\nBeauty is more than just something pretty, It shows God’s goodness and points toward the Divine. The love of beauty is called philokalia, and it brings us closer to the source of all beauty, God. And that is our purpose.",
+    quoteReference: "Psalm 27:4",
+    quote: "One *thing* I have desired of the Lord,\nThat will I seek:\nThat I may dwell in the house of the Lord\nAll the days of my life,\nTo behold the beauty of the Lord,\nAnd to inquire in His temple.",
+    imageUrl: "",
+    imageAlt: "",
+  },
+  scriptorium: {
+    title: "From the Scriptorium",
+    body: "*Knowledge of God is more valuable than anything created. — Saint Maximus the Confessor*\n\nBrowse our library to learn the lives of the saints, Church history, testimonials, and more!",
+    imageUrl: "/images/editorial/from-the-scriptorium.webp",
+    imageAlt: "An illuminated manuscript and writing desk in a monastic scriptorium",
+  },
+};
+
+const retiredInformationBubbleSets = [
+  [
+    ["rich-context", "Rich context", "Designed to encourage learning"],
+    ["collectible-format", "Collectible format", "Created for thoughtful discovery"],
+    ["considered-detail", "Considered detail", "Made to read, revisit and share"],
+  ],
+  [
+    ["rich-context", "Reverently Crafted", "Designed by a human, under the supervision of a priest."],
+    ["collectible-format", "Perfect Equality", "Each card holds the same value, no artificial scarcity."],
+    ["considered-detail", "Made in Australia", "Manufactured at home right here in Australia"],
+  ],
+] as const;
+
+function needsCurrentInformationBubbles(values: WebsiteContent["pages"]["home"]["sections"]["values"]) {
+  if (!values.bubbles?.length) return true;
+  return retiredInformationBubbleSets.some((retired) => retired.every(([id, title, body], index) => {
+    const bubble = values.bubbles?.[index];
+    return bubble?.id === id && bubble.title === title && bubble.body === body;
+  }));
+}
+
 export const defaultWebsiteContent: WebsiteContent = {
   schemaVersion: 1,
   copy: {
@@ -563,7 +715,7 @@ export const defaultWebsiteContent: WebsiteContent = {
       paper: "#f3e5ca",
       cream: "#dec69a",
       line: "#b58743",
-      surface: "#fff8e8",
+      surface: "#fcf5de",
       muted: "#5f4a3b",
       success: "#36563e",
       danger: "#7c302b",
@@ -599,6 +751,8 @@ export const defaultWebsiteContent: WebsiteContent = {
           imageUrl: "/images/history/mount-athos-simonopetra.jpg",
           imageAlt:
             "Simonopetra Monastery rising from the cliffs above the Aegean Sea at Mount Athos",
+          backImageUrl: "",
+          backImageAlt: "Back of the Doxa display card",
           imageCredit:
             "Simonopetra, Mount Athos · Angelos @ Ottawa · Public domain",
           primaryActionLabel: "Explore the collection",
@@ -613,6 +767,7 @@ export const defaultWebsiteContent: WebsiteContent = {
           thirdBody: "Made to read, revisit and share",
           marquee:
             "Collectible storytelling · Church history · Thoughtful discovery · Designed to revisit",
+          bubbles: structuredClone(defaultInformationBubbles),
         },
         featured: {
           eyebrow: "Featured collection",
@@ -631,10 +786,11 @@ export const defaultWebsiteContent: WebsiteContent = {
           actionLabel: "Discover our purpose",
         },
         newsletter: {
-          eyebrow: "From the scriptorium",
-          title: "Thoughtful updates, delivered with care.",
-          body: "Receive occasional news as new cards, collections and stories become available to explore.",
+          eyebrow: "Community",
+          title: "Our Socials",
+          body: "Follow us on social media for live updates, events, to show support, and share your experiences!",
         },
+        editorial: structuredClone(defaultHomepageEditorialPanels),
       },
       layout: {
         order: ["hero", "story", "featured", "values", "newsletter"],
@@ -773,8 +929,42 @@ const footerLinkUpgrades: Record<string, WebsiteContent["footer"]["groups"][numb
 /** Keeps older saved website documents compatible with new editor link slots. */
 export function upgradeWebsiteContent(content: WebsiteContent): WebsiteContent {
   const upgraded = structuredClone(content);
+  if (upgraded.theme.palette.surface.toLowerCase() === "#fff8e8") {
+    upgraded.theme.palette.surface = "#fcf5de";
+  }
   if (upgraded.branding.publicContactEmail === "notifications@doxatreasury.com") {
     upgraded.branding.publicContactEmail = "info@doxatreasury.com";
+  }
+  const values = upgraded.pages.home.sections.values;
+  if (needsCurrentInformationBubbles(values)) values.bubbles = structuredClone(defaultInformationBubbles);
+  upgraded.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+  const genesis = upgraded.pages.home.sections.editorial.genesis;
+  if (genesis.title === "Our Genesis" && genesis.body === "TBD.") {
+    upgraded.pages.home.sections.editorial.genesis = {
+      ...genesis,
+      title: defaultHomepageEditorialPanels.genesis.title,
+      body: defaultHomepageEditorialPanels.genesis.body,
+      quoteReference: defaultHomepageEditorialPanels.genesis.quoteReference,
+      quote: defaultHomepageEditorialPanels.genesis.quote,
+    };
+  }
+  const scriptorium = upgraded.pages.home.sections.editorial.scriptorium;
+  if (scriptorium.title === "From the Scriptorium" && scriptorium.body === "TBD.") {
+    upgraded.pages.home.sections.editorial.scriptorium = {
+      ...scriptorium,
+      body: defaultHomepageEditorialPanels.scriptorium.body,
+    };
+  }
+  const socials = upgraded.pages.home.sections.newsletter;
+  if (
+    socials.title === "Thoughtful updates, delivered with care." &&
+    socials.body === "Receive occasional news as new cards, collections and stories become available to explore."
+  ) {
+    upgraded.pages.home.sections.newsletter = {
+      eyebrow: "Community",
+      title: "Our Socials",
+      body: "Follow us on social media for live updates, events, to show support, and share your experiences!",
+    };
   }
   upgraded.footer.groups = upgraded.footer.groups.map((group) => {
     const additions = footerLinkUpgrades[group.id] ?? [];

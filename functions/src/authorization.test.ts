@@ -145,12 +145,20 @@ describe('owner and last-owner protection', () => {
   const ownerTarget = { action: 'disable' as const, callerUid: 'admin-1', targetUid: 'owner-1', callerRole: 'admin' as const, targetRole: 'owner' as const, targetIsAdmin: true, ownerCount: 2 }
 
   it('refuses self-service removal of administrator access', () => {
-    expect(() => assertAccountActionAllowed({ ...ownerTarget, targetUid: 'admin-1' })).toThrowError(/cannot remove their own access/i)
+    expect(() => assertAccountActionAllowed({ ...ownerTarget, targetUid: 'admin-1' })).toThrowError(/cannot change their own access/i)
   })
 
-  it('requires an owner to change another administrator', () => {
+  it('requires an owner to change an owner account', () => {
     expect(() => assertAccountActionAllowed(ownerTarget)).toThrowError(/owner administrator is required/i)
     expect(() => assertAccountActionAllowed({ ...ownerTarget, callerRole: 'owner' })).not.toThrow()
+  })
+
+  it('allows administrators to grant and revoke non-owner administrator access', () => {
+    const nonOwnerAdmin = { ...ownerTarget, targetRole: 'admin' as const, targetIsAdmin: true }
+    expect(() => assertAccountActionAllowed({ ...nonOwnerAdmin, action: 'revokeAdmin' })).not.toThrow()
+    expect(() => assertAccountActionAllowed({ ...nonOwnerAdmin, targetRole: 'member', targetIsAdmin: false, action: 'grantAdmin' })).not.toThrow()
+    expect(() => assertAccountActionAllowed({ ...nonOwnerAdmin, action: 'disable' })).toThrowError(/owner administrator is required/i)
+    expect(() => assertAccountActionAllowed({ ...nonOwnerAdmin, action: 'delete' })).toThrowError(/owner administrator is required/i)
   })
 
   it('never allows the final owner to be disabled, deleted or demoted', () => {

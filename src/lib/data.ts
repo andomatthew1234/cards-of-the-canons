@@ -1,33 +1,89 @@
-import { collection, deleteDoc, doc, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where } from 'firebase/firestore'
+import { collection, deleteDoc, doc, getCountFromServer, getDoc, getDocs, limit, orderBy, query, serverTimestamp, setDoc, startAfter, updateDoc, where } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { adminFunctionsAvailable, checkoutMode, isFirebaseMode } from '../config'
 import { demoJournalArticles, demoOrders, demoProducts, normaliseProductCopy } from '../data/demo'
-import type { AccountMailingListStatus, Article, EmailCampaign, EmailCampaignAudiencePage, EmailCampaignDraft, EmailCampaignPurpose, EmailCampaignWorkspace, Enquiry, NewsletterAdminOverview, NewsletterCampaignDraft, NewsletterSignupResult, NewsletterSource, NewsletterSubscriber, Order, PageContent, Product, SiteSettings } from '../types'
+import { orderProductsForDisplay } from './productOrder'
+import type { AccountMailingListStatus, Article, EmailCampaign, EmailCampaignAudiencePage, EmailCampaignDraft, EmailCampaignPurpose, EmailCampaignWorkspace, Enquiry, NewsletterAdminOverview, NewsletterCampaignDraft, NewsletterSignupResult, NewsletterSource, NewsletterSubscriber, Order, PageContent, Product, SiteSettings, SocialMediaLinksContent, SocialMediaLinksDocument, SocialMediaLinksEditorState, TermsPolicyContent, TermsPolicyDocument, TermsPolicyEditorState } from '../types'
 import { getFirebaseServices } from './firebase'
 
 export const dataMode = isFirebaseMode ? 'firebase' : 'demo'
+
+export async function getPublishedSocialMediaLinks(): Promise<SocialMediaLinksDocument | null> {
+  if (!isFirebaseMode) return null
+  const { db } = getFirebaseServices()
+  const snapshot = await getDoc(doc(db, 'socialMediaLinks', 'published'))
+  if (!snapshot.exists()) return null
+  const settings = snapshot.data() as SocialMediaLinksDocument
+  return settings.status === 'published' ? settings : null
+}
+
+export async function getSocialMediaLinksEditorState(): Promise<SocialMediaLinksEditorState> {
+  if (!adminFunctionsAvailable) throw new Error('The protected social media editor is unavailable in this environment.')
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<Record<string, never>, SocialMediaLinksEditorState>(functions, 'getSocialMediaLinksEditorState')({})).data
+}
+
+export async function saveSocialMediaLinksDraft(expectedRevision: number, content: SocialMediaLinksContent): Promise<SocialMediaLinksEditorState> {
+  if (!adminFunctionsAvailable) throw new Error('The protected social media editor is unavailable in this environment.')
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<{ expectedRevision: number; content: SocialMediaLinksContent }, SocialMediaLinksEditorState>(functions, 'saveSocialMediaLinksDraft')({ expectedRevision, content })).data
+}
+
+export async function publishSocialMediaLinks(expectedRevision: number, content: SocialMediaLinksContent): Promise<SocialMediaLinksEditorState> {
+  if (!adminFunctionsAvailable) throw new Error('The protected social media editor is unavailable in this environment.')
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<{ expectedRevision: number; content: SocialMediaLinksContent }, SocialMediaLinksEditorState>(functions, 'publishSocialMediaLinks')({ expectedRevision, content })).data
+}
+
+export async function getPublishedTermsPolicy(): Promise<TermsPolicyDocument | null> {
+  if (!isFirebaseMode) return null
+  const { db } = getFirebaseServices()
+  const snapshot = await getDoc(doc(db, 'legalPolicies', 'terms'))
+  if (!snapshot.exists()) return null
+  const policy = snapshot.data() as TermsPolicyDocument
+  return policy.status === 'published' && policy.slug === 'terms' ? policy : null
+}
+
+export async function getTermsPolicyEditorState(): Promise<TermsPolicyEditorState> {
+  if (!adminFunctionsAvailable) throw new Error('The protected Terms and Conditions editor is unavailable in this environment.')
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<Record<string, never>, TermsPolicyEditorState>(functions, 'getTermsPolicyEditorState')({})).data
+}
+
+export async function saveTermsPolicyDraft(expectedRevision: number, content: TermsPolicyContent): Promise<TermsPolicyEditorState> {
+  if (!adminFunctionsAvailable) throw new Error('The protected Terms and Conditions editor is unavailable in this environment.')
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<{ expectedRevision: number; content: TermsPolicyContent }, TermsPolicyEditorState>(functions, 'saveTermsPolicyDraft')({ expectedRevision, content })).data
+}
+
+export async function publishTermsPolicy(expectedRevision: number, content: TermsPolicyContent): Promise<TermsPolicyEditorState> {
+  if (!adminFunctionsAvailable) throw new Error('The protected Terms and Conditions editor is unavailable in this environment.')
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<{ expectedRevision: number; content: TermsPolicyContent }, TermsPolicyEditorState>(functions, 'publishTermsPolicy')({ expectedRevision, content })).data
+}
 
 export async function listPublishedProducts(): Promise<Product[]> {
   if (!isFirebaseMode) return demoProducts
   const { db } = getFirebaseServices()
   const snap = await getDocs(query(collection(db, 'products'), where('status', '==', 'published'), orderBy('name'), limit(100)))
-  return snap.docs.map((item) => normaliseProductCopy({ id: item.id, ...item.data() } as Product))
+  return orderProductsForDisplay(snap.docs.map((item) => normaliseProductCopy({ id: item.id, ...item.data() } as Product)))
 }
 
 export interface JournalArticlePage {
   articles: Article[]
   nextCursor: string | null
+  totalCount?: number
 }
 
 export interface JournalAdminPage extends JournalArticlePage {
   counts: { draft: number; published: number }
 }
 
-const JOURNAL_PAGE_SIZE = 12
+const JOURNAL_PAGE_SIZE = 10
 
 export async function listPublishedJournalArticles(cursor?: string | null, pageSize = JOURNAL_PAGE_SIZE): Promise<JournalArticlePage> {
-  if (!isFirebaseMode) return { articles: cursor ? [] : demoJournalArticles, nextCursor: null }
+  if (!isFirebaseMode) return { articles: cursor ? [] : demoJournalArticles, nextCursor: null, totalCount: demoJournalArticles.length }
   const { db } = getFirebaseServices()
   const boundedPageSize = Math.max(1, Math.min(24, Math.trunc(pageSize)))
   const base = [where('status', '==', 'published'), orderBy('publishedAt', 'desc')]
@@ -39,11 +95,15 @@ export async function listPublishedJournalArticles(cursor?: string | null, pageS
   } else {
     pageQuery = query(collection(db, 'articles'), ...base, limit(boundedPageSize + 1))
   }
-  const snap = await getDocs(pageQuery)
+  const [snap, countSnapshot] = await Promise.all([
+    getDocs(pageQuery),
+    cursor ? Promise.resolve(null) : getCountFromServer(query(collection(db, 'articles'), where('status', '==', 'published'))),
+  ])
   const visible = snap.docs.slice(0, boundedPageSize)
   return {
     articles: visible.map((item) => ({ id: item.id, ...item.data() } as Article)),
     nextCursor: snap.docs.length > boundedPageSize ? visible.at(-1)?.id ?? null : null,
+    ...(countSnapshot ? { totalCount: countSnapshot.data().count } : {}),
   }
 }
 
@@ -185,7 +245,7 @@ export async function listAdminProducts(): Promise<Product[]> {
   if (!isFirebaseMode) return demoProducts
   const { db } = getFirebaseServices()
   const snap = await getDocs(query(collection(db, 'products'), orderBy('name'), limit(100)))
-  return snap.docs.map((item) => normaliseProductCopy({ id: item.id, ...item.data() } as Product))
+  return orderProductsForDisplay(snap.docs.map((item) => normaliseProductCopy({ id: item.id, ...item.data() } as Product)))
 }
 
 export async function upsertProduct(product: Product) {
@@ -202,7 +262,26 @@ export async function deleteProduct(id: string) {
   window.dispatchEvent(new Event('cards:catalog-updated'))
 }
 
-export async function uploadProductImage(productId: string, file: File) {
+export interface ProductMediaItem {
+  path: string
+  size: number
+  contentType: string | null
+  createdAt: string | null
+  updatedAt: string | null
+  url?: string
+}
+
+export async function listProductMedia(): Promise<ProductMediaItem[]> {
+  if (!isFirebaseMode) return []
+  const { functions, storage } = getFirebaseServices()
+  const items = (await httpsCallable<{ limit: number }, { items: ProductMediaItem[] }>(functions, 'listProductMedia')({ limit: 100 })).data.items
+  return Promise.all(items.map(async (item) => {
+    try { return { ...item, url: await getDownloadURL(ref(storage, item.path)) } }
+    catch { return item }
+  }))
+}
+
+export async function uploadProductImage(file: File) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) {
     throw new Error('Choose a JPG, PNG or WebP image smaller than 5 MB.')
   }
@@ -211,14 +290,16 @@ export async function uploadProductImage(productId: string, file: File) {
   const uid = auth?.currentUser?.uid
   if (!uid) throw new Error('Please sign in to continue.')
   await auth.currentUser.getIdToken(true)
-  const objectName = `${Date.now()}-${safeName}`
+  const objectName = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${safeName}`.slice(-120)
   const stagingPath = `image-staging/${uid}/${objectName}`
   // Private staging first: the object is only copied into a public path after
   // the server re-validates size, declared type and magic bytes.
   await uploadBytes(ref(storage, stagingPath), file, { contentType: file.type })
   const publish = httpsCallable<{ stagingPath: string; destination: string }, { path: string }>(functions, 'publishStagedImage')
-  const result = await publish({ stagingPath, destination: `product-images/${productId}/${objectName}` })
-  if (!result.data.path.startsWith('product-images/')) {
+  // Catalogue media is independent from a product URL. Administrators can
+  // upload it before creating a product, then reuse it across the catalogue.
+  const result = await publish({ stagingPath, destination: `product-images/library/${objectName}` })
+  if (!result.data.path.startsWith('product-images/library/')) {
     throw new Error('The image service returned an invalid location.')
   }
   return getDownloadURL(ref(storage, result.data.path))

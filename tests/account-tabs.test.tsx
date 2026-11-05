@@ -19,9 +19,21 @@ describe('account mode tabs', () => {
     await userEvent.click(register)
     expect(register.parentElement).toHaveClass('register-selected')
     expect(register).toHaveAttribute('aria-selected', 'true')
-    expect(screen.queryByRole('checkbox', { name: /Also sign me up to the mailing list/i })).not.toBeInTheDocument()
+    const terms = screen.getByRole('checkbox', { name: /I accept the Terms and Conditions/i })
+    const news = screen.getByRole('checkbox', { name: /Receive news and updates/i })
+    expect(terms).not.toBeChecked()
+    expect(news).toBeChecked()
+    expect(screen.getByRole('button', { name: 'Create account' })).toBeDisabled()
+    expect(screen.getByRole('link', { name: 'Terms and Conditions' })).toHaveAttribute('href', '/policies/terms')
     await userEvent.click(signIn)
     expect(signIn.parentElement).toHaveClass('signin-selected')
+  })
+
+  it('opens registration directly from the homepage account action', () => {
+    render(<MemoryRouter initialEntries={['/account?mode=register']}><AuthProvider><Account /></AuthProvider></MemoryRouter>)
+
+    expect(screen.getByRole('tab', { name: 'Register' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('heading', { name: 'Create your account' })).toBeInTheDocument()
   })
 
   it('keeps the branded setup screen visible for five seconds, then opens onboarding', async () => {
@@ -32,6 +44,7 @@ describe('account mode tabs', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Full name' }), { target: { value: 'Matthew Anderson' } })
     fireEvent.change(screen.getByRole('textbox', { name: 'Email address' }), { target: { value: 'matthew@example.com' } })
     fireEvent.change(document.querySelector<HTMLInputElement>('input[name="password"]')!, { target: { value: 'secure-password' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: /I accept the Terms and Conditions/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Create account' }))
 
     expect(screen.getByRole('heading', { name: /Setting up your account with us/i })).toBeInTheDocument()

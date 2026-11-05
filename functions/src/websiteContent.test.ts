@@ -4,11 +4,47 @@ import {
   legacyWebsiteContent, mediaLockId, referencedWebsiteMedia,
   publishedDraftDocument, storagePathFromImageUrl, versionDocumentId,
 } from './websiteContent'
-import { defaultWebsiteContent } from './websiteContentSchema'
+import { defaultWebsiteContent, parseWebsiteContent, websiteContentSchema } from './websiteContentSchema'
 
 const image = 'https://firebasestorage.googleapis.com/v0/b/example.appspot.com/o/page-images%2Flibrary%2Fhero.jpg?alt=media&token=abc'
 
 describe('website content helpers', () => {
+  it('migrates legacy values to the five current editable selling points and validates background media', () => {
+    const legacy = structuredClone(defaultWebsiteContent)
+    delete legacy.pages.home.sections.values.bubbles
+    const bubbles = parseWebsiteContent(legacy).pages.home.sections.values.bubbles
+    expect(bubbles).toHaveLength(5)
+    expect(bubbles?.map((bubble) => bubble.title)).toEqual([
+      'Tested for child safety',
+      'Reverently produced',
+      'No AI',
+      'No artificial scarcity',
+      'Made in Australia',
+    ])
+
+    const content = structuredClone(defaultWebsiteContent)
+    const bubble = content.pages.home.sections.values.bubbles![0]
+    bubble.imageUrl = '/images/history/candles.jpg'
+    bubble.imageAlt = 'Prayer candles'
+    expect(websiteContentSchema.safeParse(content).success).toBe(true)
+    bubble.imageAlt = ''
+    expect(websiteContentSchema.safeParse(content).success).toBe(false)
+  })
+
+  it('only upgrades the exact retired three-card set and preserves custom bubbles', () => {
+    const retired = structuredClone(defaultWebsiteContent)
+    retired.pages.home.sections.values.bubbles = [
+      { id: 'rich-context', title: 'Reverently Crafted', body: 'Designed by a human, under the supervision of a priest.', imageUrl: '', imageAlt: '' },
+      { id: 'collectible-format', title: 'Perfect Equality', body: 'Each card holds the same value, no artificial scarcity.', imageUrl: '', imageAlt: '' },
+      { id: 'considered-detail', title: 'Made in Australia', body: 'Manufactured at home right here in Australia', imageUrl: '', imageAlt: '' },
+    ]
+    expect(parseWebsiteContent(retired).pages.home.sections.values.bubbles).toHaveLength(5)
+
+    const custom = structuredClone(defaultWebsiteContent)
+    custom.pages.home.sections.values.bubbles = [{ id: 'custom', title: 'Custom', body: '', imageUrl: '', imageAlt: '' }]
+    expect(parseWebsiteContent(custom).pages.home.sections.values.bubbles).toEqual(custom.pages.home.sections.values.bubbles)
+  })
+
   it('migrates bounded legacy content without copying unknown data', () => {
     const sections = {
       hero:{ accent:'Legacy accent',imageUrl:'/images/legacy.jpg',imageAlt:'Legacy image',imageCredit:'',primaryActionLabel:'Explore',secondaryActionLabel:'About us' },

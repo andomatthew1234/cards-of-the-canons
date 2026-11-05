@@ -26,6 +26,7 @@ describe('server-owned profile mutation', () => {
   it('accepts only bounded profile fields and never a client email', () => {
     expect(profileUpdateSchema.safeParse({ displayName: 'Ada', phone: '0400 000 000' }).success).toBe(true)
     expect(profileUpdateSchema.safeParse({ phone: null }).success).toBe(true)
+    expect(profileUpdateSchema.safeParse({ checkoutAndEnquiryAutofill: false }).success).toBe(true)
     // The email address is derived from the Auth record; a caller cannot
     // supply one, and unknown keys are rejected outright.
     expect(profileUpdateSchema.safeParse({ email: 'attacker@example.com' }).success).toBe(false)
@@ -67,6 +68,16 @@ describe('server-owned profile mutation', () => {
     await applyProfileUpdate('uid-1', { phone: null }, env)
     expect(saves).toHaveLength(1)
     expect(typeof saves[0].data.phone).not.toBe('string')
+  })
+
+  it('updates only the customer-controlled autofill preference', async () => {
+    const { env, saves } = scenario({ current: {
+      displayName: 'Ada', email: 'customer@example.com', phone: '',
+      preferences: { checkoutAndEnquiryAutofill: true, mailingListRequested: true },
+    } })
+    await applyProfileUpdate('uid-1', { checkoutAndEnquiryAutofill: false }, env)
+    expect(saves).toHaveLength(1)
+    expect(saves[0].data.preferences).toEqual({ checkoutAndEnquiryAutofill: false, mailingListRequested: true })
   })
 
   it('fails closed when the rate limit rejects the change', async () => {

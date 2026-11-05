@@ -2,8 +2,8 @@ import { ArrowRight } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-export function AccountPanel({ title, description, children, className = '' }: { title: string; description?: string; children: ReactNode; className?: string }) {
-  return <section className={`account-panel ${className}`}><header><h2>{title}</h2>{description && <p>{description}</p>}</header><div className="account-panel-body">{children}</div></section>
+export function AccountPanel({ title, description, children, className = '', ariaLabel }: { title: string; description?: string; children: ReactNode; className?: string; ariaLabel?: string }) {
+  return <section className={`account-panel ${className}`} aria-label={ariaLabel}><header><h2>{title}</h2>{description && <p>{description}</p>}</header><div className="account-panel-body">{children}</div></section>
 }
 
 export function AccountSettingRow({ icon, title, description, status, action, tone = 'neutral' }: { icon: ReactNode; title: string; description: ReactNode; status?: ReactNode; action?: ReactNode; tone?: 'neutral' | 'positive' | 'warning' | 'danger' }) {

@@ -13,6 +13,7 @@ afterEach(() => {
 })
 
 beforeEach(() => {
+  Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
   window.matchMedia = vi.fn().mockReturnValue({
     matches: false,
     addEventListener: vi.fn(),
@@ -38,8 +39,44 @@ describe('public-site startup and header contract', () => {
     expect(screen.getByRole('banner')).toHaveClass('public-header', 'is-overlay')
     home.unmount()
 
-    render(<MemoryRouter initialEntries={['/shop']}><Layout><p>Shop</p></Layout></MemoryRouter>)
+    const about = render(<MemoryRouter initialEntries={['/about']}><Layout><p>About</p></Layout></MemoryRouter>)
+    expect(screen.getByRole('banner')).toHaveClass('public-header', 'immersive-header', 'is-overlay')
+    about.unmount()
+
+    const shop = render(<MemoryRouter initialEntries={['/shop']}><Layout><p>Shop</p></Layout></MemoryRouter>)
     expect(screen.getByRole('banner')).toHaveClass('public-header', 'is-surface')
+    shop.unmount()
+
+    render(<MemoryRouter initialEntries={['/journal/a-story']}><Layout><p>Journal article</p></Layout></MemoryRouter>)
+    expect(screen.getByRole('banner')).toHaveClass('public-header', 'is-surface')
+  })
+
+  it('blends into integrated Journal artwork, then becomes a raised surface after scrolling', async () => {
+    render(<MemoryRouter initialEntries={['/journal']}><Layout><section className="journal-hero">Journal hero</section></Layout></MemoryRouter>)
+
+    const header = screen.getByRole('banner')
+    expect(header).toHaveClass('public-header', 'is-overlay')
+    expect(header).toHaveClass('immersive-header')
+    expect(document.querySelector('.site-shell')).toHaveClass('immersive-shell')
+
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 80 })
+    fireEvent.scroll(window)
+    await waitFor(() => expect(header).toHaveClass('is-surface', 'is-scrolled'))
+
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
+    fireEvent.scroll(window)
+    await waitFor(() => expect(header).toHaveClass('is-overlay'))
+  })
+
+  it('keeps the same header transition inside the Website Editor preview scroller', async () => {
+    const { container } = render(<MemoryRouter><div className="website-preview-shell"><Layout previewMode previewPath="/about"><section>About preview</section></Layout></div></MemoryRouter>)
+    const header = screen.getByRole('banner')
+    const previewScroller = container.querySelector<HTMLElement>('.website-preview-shell')!
+    expect(header).toHaveClass('is-overlay')
+
+    Object.defineProperty(previewScroller, 'scrollTop', { configurable: true, value: 80 })
+    fireEvent.scroll(previewScroller)
+    await waitFor(() => expect(header).toHaveClass('is-surface', 'is-scrolled'))
   })
 
   it('contains mobile-menu focus, closes with Escape and restores the trigger', async () => {

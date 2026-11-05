@@ -46,6 +46,7 @@ describe('copy normalisation', () => {
       description: 'A proposed study set bringing together key people and moments from the Reformation. Final card count, subjects, artwork and contents are awaiting approval.',
     }
     expect(normaliseProductCopy(legacyProduct).description).toBe(legacyProduct.description)
+    expect(normaliseProductCopy({ ...legacyProduct, sortOrder: undefined }).sortOrder).toBe(1000)
   })
 
   it('rebrands previously stored editable content without changing infrastructure identifiers', () => {

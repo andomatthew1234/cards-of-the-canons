@@ -55,10 +55,12 @@ import { RichTextField } from "../../admin/components";
 import { useUnsavedChanges } from "../../admin/utils";
 import {
   cloneWebsiteContent,
+  defaultHomepageEditorialPanels,
   defaultWebsiteContent,
   homeSectionIds,
   websiteContentSchema,
   type HomeSectionId,
+  type HomepageEditorialPanels,
   type WebsiteContent,
   type WebsitePageId,
 } from "../../cms/websiteContent";
@@ -647,8 +649,8 @@ function WebsitePreview({
         >
           <p>{home.eyebrow}</p>
           <h1>{home.title}</h1>
-          <span>{home.body}</span>
-          <div>
+          <SafeRichText value={home.body} className="website-preview-hero-copy" />
+          <div className="website-preview-hero-actions">
             <button>{home.sections.hero.primaryActionLabel}</button>
             <button>{home.sections.hero.secondaryActionLabel}</button>
           </div>
@@ -668,9 +670,11 @@ function WebsitePreview({
     if (id === "featured")
       return (
         <section className="website-preview-standard">
-          <p>{home.sections.featured.eyebrow}</p>
-          <h2>{home.sections.featured.title}</h2>
-          <span>{home.sections.featured.body}</span>
+          {(home.sections.featured.eyebrow || home.sections.featured.title || home.sections.featured.body) && <div>
+            {home.sections.featured.eyebrow && <p>{home.sections.featured.eyebrow}</p>}
+            {home.sections.featured.title && <h2>{home.sections.featured.title}</h2>}
+            {home.sections.featured.body && <span>{home.sections.featured.body}</span>}
+          </div>}
           <div className="website-preview-products">
             <i />
             <i />
@@ -733,14 +737,14 @@ function WebsitePreview({
             )
           ) : (
             <>
-              <section className="website-preview-page-hero">
+              {(previewImage || previewPage.eyebrow || previewPage.title || previewPage.body) && <section className="website-preview-page-hero">
                 {previewImage && <img src={previewImage.imageUrl} alt="" />}
                 <div>
-                  <p>{previewPage.eyebrow}</p>
-                  <h1>{previewPage.title}</h1>
-                  <span>{previewPage.body}</span>
+                  {previewPage.eyebrow && <p>{previewPage.eyebrow}</p>}
+                  {previewPage.title && <h1>{previewPage.title}</h1>}
+                  {previewPage.body && <span>{previewPage.body}</span>}
                 </div>
-              </section>
+              </section>}
               <section className="website-preview-placeholder">
                 <i />
                 <i />
@@ -946,8 +950,17 @@ export function WebsiteEditorPage() {
           if (
             !parsedDraft.success ||
             (parsedPublished !== null && !parsedPublished.success)
-          )
-            throw new Error("The saved draft could not be prepared.");
+          ) {
+            const issue = !parsedDraft.success
+              ? parsedDraft.error.issues[0]
+              : parsedPublished && !parsedPublished.success
+                ? parsedPublished.error.issues[0]
+                : null;
+            const location = issue?.path.join(" → ");
+            throw new Error(
+              `The saved website content needs attention${location ? ` at ${location}` : ""}${issue ? `: ${issue.message}` : "."}`,
+            );
+          }
           return {
             ...next,
             draft: {
@@ -1390,6 +1403,8 @@ export function WebsiteEditorPage() {
   const selectedDefinition = selectedTarget
     ? websiteEditorTargets[selectedTarget]
     : undefined;
+  const editorialPanels: HomepageEditorialPanels =
+    content.pages.home.sections.editorial ?? defaultHomepageEditorialPanels;
   const selectedPage =
     section === "home" || section === "about" || section === "shop" || section === "contact"
       ? section
@@ -1408,7 +1423,9 @@ export function WebsiteEditorPage() {
         <EditorGroup
           controlId="page-introduction"
           title="Page introduction"
-          description="The principal public message and search preview for this page."
+          description={page === "shop"
+            ? "Optional. Leave any or all text fields blank to hide them; leave all three blank to begin directly with the products."
+            : "The principal public message and search preview for this page."}
         >
           <TextField
             label="Eyebrow"
@@ -1596,7 +1613,7 @@ export function WebsiteEditorPage() {
               }
             />
             <MediaField
-              label="Hero image URL"
+              label="Display card front image URL"
               fieldId="hero-image"
               value={content.pages.home.sections.hero.imageUrl}
               onChange={(value) =>
@@ -1607,12 +1624,35 @@ export function WebsiteEditorPage() {
               media={media}
             />
             <TextField
-              label="Hero alt text"
+              label="Display card front alt text"
               value={content.pages.home.sections.hero.imageAlt}
               maxLength={200}
               onChange={(value) =>
                 mutate((draft) => {
                   draft.pages.home.sections.hero.imageAlt = value;
+                })
+              }
+            />
+            <MediaField
+              label="Display card back image URL"
+              fieldId="hero-back-image"
+              value={content.pages.home.sections.hero.backImageUrl ?? ""}
+              hint="Optional. Select a rear-card image from the Media library. Leave blank to keep the branded Doxa back."
+              onChange={(value) =>
+                mutate((draft) => {
+                  draft.pages.home.sections.hero.backImageUrl = value;
+                })
+              }
+              media={media}
+            />
+            <TextField
+              label="Display card back alt text"
+              value={content.pages.home.sections.hero.backImageAlt ?? ""}
+              maxLength={200}
+              hint="Describe the rear artwork when a custom image is used."
+              onChange={(value) =>
+                mutate((draft) => {
+                  draft.pages.home.sections.hero.backImageAlt = value;
                 })
               }
             />
@@ -1692,32 +1732,247 @@ export function WebsiteEditorPage() {
                 })
               }
             />
-            {(["first", "second", "third"] as const).map((id, index) => (
-              <div className="website-field-pair" key={id}>
+            <p className="website-field-help">Add up to 12 information bubbles. Existing values have been preserved as your first bubbles.</p>
+            {(content.pages.home.sections.values.bubbles ?? []).map((bubble, index, bubbles) => (
+              <div className="website-editor-repeater" key={bubble.id}>
+                <div className="website-editor-repeater-heading">
+                  <strong>Information bubble {index + 1}</strong>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    aria-label={`Delete information bubble ${index + 1}`}
+                    disabled={bubbles.length <= 1}
+                    title={bubbles.length <= 1 ? "Keep at least one information bubble" : "Delete information bubble"}
+                    onClick={() => mutate((draft) => {
+                      draft.pages.home.sections.values.bubbles = (draft.pages.home.sections.values.bubbles ?? []).filter((item) => item.id !== bubble.id);
+                    })}
+                  ><Trash2 aria-hidden="true" /></button>
+                </div>
                 <TextField
-                  label={`Value ${index + 1} title`}
-                  value={content.pages.home.sections.values[`${id}Title`]}
+                  label="Title"
+                  value={bubble.title}
                   maxLength={80}
-                  onChange={(value) =>
-                    mutate((draft) => {
-                      draft.pages.home.sections.values[`${id}Title`] = value;
-                    })
-                  }
+                  onChange={(value) => mutate((draft) => {
+                    const item = draft.pages.home.sections.values.bubbles?.find((candidate) => candidate.id === bubble.id);
+                    if (item) item.title = value;
+                  })}
                 />
-                <TextField
-                  label={`Value ${index + 1} description`}
-                  value={content.pages.home.sections.values[`${id}Body`]}
-                  maxLength={160}
-                  onChange={(value) =>
-                    mutate((draft) => {
-                      draft.pages.home.sections.values[`${id}Body`] = value;
-                    })
-                  }
+                <TextArea
+                  label="Description"
+                  value={bubble.body}
+                  maxLength={600}
+                  rows={3}
+                  onChange={(value) => mutate((draft) => {
+                    const item = draft.pages.home.sections.values.bubbles?.find((candidate) => candidate.id === bubble.id);
+                    if (item) item.body = value;
+                  })}
                 />
+                <MediaField
+                  label="Optional background image"
+                  value={bubble.imageUrl}
+                  onChange={(value) => mutate((draft) => {
+                    const item = draft.pages.home.sections.values.bubbles?.find((candidate) => candidate.id === bubble.id);
+                    if (item) item.imageUrl = value;
+                  })}
+                  media={media}
+                  hint="Optional. A soft overlay keeps the bubble text legible."
+                />
+                {bubble.imageUrl && <TextField
+                  label="Background image description"
+                  value={bubble.imageAlt}
+                  maxLength={200}
+                  onChange={(value) => mutate((draft) => {
+                    const item = draft.pages.home.sections.values.bubbles?.find((candidate) => candidate.id === bubble.id);
+                    if (item) item.imageAlt = value;
+                  })}
+                />}
               </div>
             ))}
+            <button
+              className="button secondary"
+              type="button"
+              disabled={(content.pages.home.sections.values.bubbles?.length ?? 0) >= 12}
+              onClick={() => mutate((draft) => {
+                const bubbles = draft.pages.home.sections.values.bubbles ?? [];
+                if (bubbles.length >= 12) return;
+                draft.pages.home.sections.values.bubbles = [...bubbles, {
+                  id: `bubble-${Date.now().toString(36)}-${bubbles.length + 1}`,
+                  title: "New value",
+                  body: "Add the detail you would like to share.",
+                  imageUrl: "",
+                  imageAlt: "",
+                }];
+              })}
+            >Add information bubble</button>
           </EditorGroup>
-          <EditorGroup controlId="featured" title="Featured collection">
+          <EditorGroup
+            controlId="editorial-panels"
+            title="Smaller homepage info boxes"
+            description="Edit the three compact image-and-copy panels below the moving values. Click any panel in the preview to jump here."
+          >
+            <div className="website-editor-repeater" id="editorial-council">
+              <div className="website-editor-repeater-heading"><strong>Join the Council</strong></div>
+              <TextField
+                label="Title"
+                value={editorialPanels.council.title}
+                maxLength={160}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.council.title = value;
+                })}
+              />
+              <TextArea
+                label="Body"
+                value={editorialPanels.council.body}
+                maxLength={2000}
+                rows={5}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.council.body = value;
+                })}
+              />
+              <TextField
+                label="Verse reference"
+                value={editorialPanels.council.quoteReference}
+                maxLength={120}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.council.quoteReference = value;
+                })}
+              />
+              <TextArea
+                label="Verse"
+                value={editorialPanels.council.quote}
+                maxLength={1000}
+                rows={4}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.council.quote = value;
+                })}
+              />
+              <MediaField
+                label="Image"
+                value={editorialPanels.council.imageUrl}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.council.imageUrl = value;
+                })}
+                media={media}
+                hint="Choose an existing Media Library image or upload a new one."
+              />
+              {editorialPanels.council.imageUrl && <TextField
+                label="Image description"
+                value={editorialPanels.council.imageAlt}
+                maxLength={200}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.council.imageAlt = value;
+                })}
+              />}
+            </div>
+            <div className="website-editor-repeater" id="editorial-genesis">
+              <div className="website-editor-repeater-heading"><strong>How It Began</strong></div>
+              <TextField
+                label="Title"
+                value={editorialPanels.genesis.title}
+                maxLength={160}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.genesis.title = value;
+                })}
+              />
+              <TextArea
+                label="Body"
+                value={editorialPanels.genesis.body}
+                maxLength={2000}
+                rows={5}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.genesis.body = value;
+                })}
+              />
+              <TextField
+                label="Verse reference"
+                value={editorialPanels.genesis.quoteReference}
+                maxLength={120}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.genesis.quoteReference = value;
+                })}
+              />
+              <TextArea
+                label="Verse"
+                value={editorialPanels.genesis.quote}
+                maxLength={1000}
+                rows={6}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.genesis.quote = value;
+                })}
+              />
+              <MediaField
+                label="Image"
+                value={editorialPanels.genesis.imageUrl}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.genesis.imageUrl = value;
+                })}
+                media={media}
+                hint="Choose the How It Began image from the Media Library. Leave empty to keep the placeholder."
+              />
+              {editorialPanels.genesis.imageUrl && <TextField
+                label="Image description"
+                value={editorialPanels.genesis.imageAlt}
+                maxLength={200}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.genesis.imageAlt = value;
+                })}
+              />}
+            </div>
+            <div className="website-editor-repeater" id="editorial-scriptorium">
+              <div className="website-editor-repeater-heading"><strong>From the Scriptorium</strong></div>
+              <TextField
+                label="Title"
+                value={editorialPanels.scriptorium.title}
+                maxLength={160}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.scriptorium.title = value;
+                })}
+              />
+              <TextArea
+                label="Body"
+                value={editorialPanels.scriptorium.body}
+                maxLength={2000}
+                rows={5}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.scriptorium.body = value;
+                })}
+              />
+              <MediaField
+                label="Image"
+                value={editorialPanels.scriptorium.imageUrl}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.scriptorium.imageUrl = value;
+                })}
+                media={media}
+                hint="Choose an existing Media Library image or upload a new one."
+              />
+              {editorialPanels.scriptorium.imageUrl && <TextField
+                label="Image description"
+                value={editorialPanels.scriptorium.imageAlt}
+                maxLength={200}
+                onChange={(value) => mutate((draft) => {
+                  draft.pages.home.sections.editorial ??= structuredClone(defaultHomepageEditorialPanels);
+                  draft.pages.home.sections.editorial.scriptorium.imageAlt = value;
+                })}
+              />}
+            </div>
+          </EditorGroup>
+          <EditorGroup controlId="featured" title="Featured collection" description="Leave any text field blank to hide it from the Shop section.">
             <TextField
               label="Eyebrow"
               value={content.pages.home.sections.featured.eyebrow}
@@ -1839,6 +2094,31 @@ export function WebsiteEditorPage() {
                   draft.copy.homeViewAllLabel = value;
                 })
               }
+            />
+            <TextField
+              label="Socials eyebrow"
+              value={content.pages.home.sections.newsletter.eyebrow}
+              maxLength={80}
+              onChange={(value) => mutate((draft) => {
+                draft.pages.home.sections.newsletter.eyebrow = value;
+              })}
+            />
+            <TextField
+              label="Socials title"
+              value={content.pages.home.sections.newsletter.title}
+              maxLength={160}
+              onChange={(value) => mutate((draft) => {
+                draft.pages.home.sections.newsletter.title = value;
+              })}
+            />
+            <TextArea
+              label="Socials body"
+              value={content.pages.home.sections.newsletter.body}
+              maxLength={1000}
+              rows={4}
+              onChange={(value) => mutate((draft) => {
+                draft.pages.home.sections.newsletter.body = value;
+              })}
             />
           </EditorGroup>
         </>

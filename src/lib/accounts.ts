@@ -9,7 +9,7 @@ import { adminFunctionsAvailable, authOnlyLocalMode } from '../config'
 // address from the Auth record instead of trusting the caller, and skips the
 // write when nothing changed, so profile and email synchronisation stay
 // usable without leaving a client-writable path behind.
-async function updateMyProfile(values: { displayName?: string; phone?: string | null }) {
+async function updateMyProfile(values: { displayName?: string; phone?: string | null; checkoutAndEnquiryAutofill?: boolean }) {
   const { functions } = getFirebaseServices()
   const callable = httpsCallable<typeof values, { updated: boolean }>(functions, 'updateMyProfile')
   return (await callable(values)).data
@@ -41,6 +41,11 @@ export async function saveUserProfile(_uid: string, values: Pick<UserProfile, 'd
     displayName: values.displayName,
     ...(values.phone === undefined ? {} : { phone: values.phone }),
   })
+}
+
+export async function saveCheckoutAndEnquiryAutofillPreference(_uid: string, enabled: boolean) {
+  if (authOnlyLocalMode) return { updated: false }
+  return updateMyProfile({ checkoutAndEnquiryAutofill: enabled })
 }
 
 export async function syncUserProfileEmail(_uid: string, _email: string) {
@@ -127,12 +132,12 @@ export async function listManagedAccounts(): Promise<ManagedAccount[]> {
   })
 }
 
-export type AccountAdminAction = 'disable' | 'enable' | 'delete' | 'revokeAdmin'
+export type AccountAdminAction = 'disable' | 'enable' | 'delete' | 'grantAdmin' | 'revokeAdmin'
 
 export async function manageAccount(uid: string, action: AccountAdminAction) {
   const { db, functions } = getFirebaseServices()
   if (adminFunctionsAvailable) return void await httpsCallable(functions, 'manageUserAccount')({ uid, action })
-  if (action === 'revokeAdmin') throw new Error('Administrator roles are managed by trusted server tooling only.')
+  if (action === 'grantAdmin' || action === 'revokeAdmin') throw new Error('Administrator roles are managed by trusted server tooling only.')
   if (action === 'delete') {
     // Best-effort tombstone only. Profile data, Auth records and orders are
     // removed by the resumable server deletion routine, never by a client.

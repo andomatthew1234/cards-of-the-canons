@@ -216,7 +216,7 @@ export async function queueNewsletterCampaign(campaignId: string, actorUid: stri
   try {
     const segmentId = await ensureNewsletterSegment()
     const audienceCount = await synchroniseAudience(segmentId)
-    if (audienceCount === 0) throw new HttpsError('failed-precondition', 'There are no confirmed subscribers to send to.')
+    if (audienceCount === 0) throw new HttpsError('failed-precondition', 'There are no active subscribers to send to.')
     const content = campaignInput.parse({
       id: campaignId, subject: campaign.data.subject, previewText: campaign.data.previewText ?? '', heading: campaign.data.heading,
       body: campaign.data.body, buttonLabel: campaign.data.buttonLabel ?? '', buttonUrl: campaign.data.buttonUrl ?? '',

@@ -11,7 +11,7 @@ const newEnquiry: Enquiry = {
 }
 
 const lowStockProduct: Product = {
-  id: 'product-1', slug: 'product-one', name: 'Product One', shortDescription: 'Short description', description: 'Description', priceCents: 1200, currency: 'AUD', imageUrl: '/placeholder.svg', imageAlt: '', category: 'Cards', featured: false, stock: 3, status: 'published',
+  id: 'product-1', slug: 'product-one', name: 'Product One', shortDescription: 'Short description', description: 'Description', priceCents: 1200, currency: 'AUD', imageUrl: '/placeholder.svg', imageAlt: '', category: 'Cards', featured: false, stock: 3, treasuryCardsPerUnit: 1, status: 'published',
 }
 
 describe('administrator notifications', () => {

@@ -1,5 +1,7 @@
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { getStorage } from 'firebase-admin/storage'
+import { randomUUID } from 'node:crypto'
+import { z } from 'zod'
 import { authorizeRequest, type CallableRequestLike } from './authorization'
 import { publishImageSchema } from './validation'
 
@@ -10,10 +12,49 @@ export const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp'] as co
 
 const stagingPattern = /^image-staging\/([A-Za-z0-9_-]{1,128})\/([A-Za-z0-9._-]{1,120})$/
 const destinationPattern = /^(product-images|page-images)\/([A-Za-z0-9._-]{1,120})\/([A-Za-z0-9._-]{1,120})$/
+const listProductMediaSchema = z.object({ limit: z.number().int().min(1).max(100).optional() }).strict()
+
+export interface DownloadableImageMetadata {
+  cacheControl?: string
+  metadata?: Record<string, string | number | boolean | null>
+}
+
+export interface DownloadableImageFile {
+  setMetadata: (metadata: { cacheControl?: string; metadata: Record<string, string | number | boolean | null> }) => Promise<unknown>
+}
 
 export interface StagingPath {
   uid: string
   fileName: string
+}
+
+/**
+ * Firebase Web SDK download URLs require an object-level download token even
+ * when Storage Rules allow public reads. Keep that token server-generated so
+ * newly published media can be selected immediately in the admin library.
+ */
+export function publicImageMetadata(contentType: string, downloadToken = randomUUID()) {
+  return {
+    contentType,
+    cacheControl: 'public,max-age=31536000,immutable',
+    metadata: { firebaseStorageDownloadTokens: downloadToken },
+  }
+}
+
+/**
+ * Repairs media uploaded before download-token publication was introduced.
+ * This makes every existing Media Library thumbnail selectable through the
+ * Firebase Web SDK without replacing the file or changing its public URL
+ * after the first repair.
+ */
+export async function ensurePublicImageDownloadToken(file: DownloadableImageFile, metadata: DownloadableImageMetadata, downloadToken = randomUUID()) {
+  const existingMetadata = metadata.metadata ?? {}
+  if (typeof existingMetadata.firebaseStorageDownloadTokens === 'string' && existingMetadata.firebaseStorageDownloadTokens.trim()) return false
+  await file.setMetadata({
+    cacheControl: metadata.cacheControl || 'public,max-age=31536000,immutable',
+    metadata: { ...existingMetadata, firebaseStorageDownloadTokens: downloadToken },
+  })
+  return true
 }
 
 /** Strict parse of a private staging object path. Returns null on anything unexpected. */
@@ -60,6 +101,46 @@ export function validateImageBytes(bytes: Uint8Array, declaredType: unknown): { 
 }
 
 /**
+ * Lists reusable catalogue imagery without exposing bucket enumeration to the
+ * public client. This deliberately includes both the central website Media
+ * Library and the legacy product-image library so an administrator uploads an
+ * image once and can then select it for a shop item. The caller is
+ * re-authorised server-side on every request.
+ */
+export const listProductMedia = onCall({
+  region,
+  enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true',
+  maxInstances: 4,
+}, async (request) => {
+  await authorizeRequest(request as CallableRequestLike, { requireAdmin: true })
+  const parsed = listProductMediaSchema.safeParse(request.data ?? {})
+  if (!parsed.success) throw new HttpsError('invalid-argument', 'The media-library request is invalid.')
+  const limit = parsed.data.limit ?? 100
+  const bucket = getStorage().bucket()
+  const [[productFiles], [websiteLibraryFiles]] = await Promise.all([
+    bucket.getFiles({ prefix: 'product-images/', autoPaginate: false, maxResults: limit }),
+    bucket.getFiles({ prefix: 'page-images/library/', autoPaginate: false, maxResults: limit }),
+  ])
+  const files = [...productFiles, ...websiteLibraryFiles]
+  const items = await Promise.all(files
+    .filter((file) => !file.name.endsWith('/'))
+    .map(async (file) => {
+      const [metadata] = await file.getMetadata()
+      await ensurePublicImageDownloadToken(file, metadata)
+      return {
+        path: file.name,
+        size: Number(metadata.size ?? 0),
+        contentType: metadata.contentType ?? null,
+        createdAt: metadata.timeCreated ?? null,
+        updatedAt: metadata.updated ?? null,
+      }
+    }))
+  return {
+    items: items.sort((left, right) => String(right.updatedAt ?? '').localeCompare(String(left.updatedAt ?? ''))),
+  }
+})
+
+/**
  * Publication boundary: clients may only write to their private staging area.
  * This server function is the only path from staging to a publicly readable
  * `product-images`/`page-images` object, and it re-validates size, declared
@@ -96,7 +177,7 @@ export const publishStagedImage = onCall({
   if (!verdict.ok) throw new HttpsError('invalid-argument', 'The staged image failed validation.')
 
   const target = bucket.file(destination)
-  await target.save(bytes, { contentType: verdict.type, resumable: false, metadata: { cacheControl: 'public,max-age=31536000,immutable' } })
+  await target.save(bytes, { resumable: false, metadata: publicImageMetadata(verdict.type) })
   // The staging object never survives publication, so nothing unpublishable
   // lingers in a readable location.
   await source.delete({ ignoreNotFound: true })

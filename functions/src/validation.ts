@@ -52,7 +52,7 @@ export const newsletterTokenSchema = z.object({
 
 export const accountAdminActionSchema = z.object({
   uid: z.string().min(1).max(128),
-  action: z.enum(['disable', 'enable', 'delete', 'revokeAdmin']),
+  action: z.enum(['disable', 'enable', 'delete', 'grantAdmin', 'revokeAdmin']),
 }).strict()
 
 export const listAccountsSchema = z.object({

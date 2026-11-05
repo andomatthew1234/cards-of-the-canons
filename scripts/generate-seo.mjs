@@ -121,6 +121,7 @@ const routes = [
   { route: '/shop', title: 'Church-history collectible cards', description: 'Explore the Doxa collection: thoughtfully presented collectible cards inspired by Christian and church history.', body: `<main>${nav}<h1>Browse the archive</h1><p>Discover collectible stories inspired by remarkable people, places and turning points from church history.</p><div data-static-products></div></main>` },
   { route: '/about', title: 'About Doxa', description: 'Discover the purpose behind Doxa and its thoughtful approach to Christian and church-history collectibles.', body: `<main>${nav}<h1>Church history, made to collect and explore</h1><h2>History you can hold</h2><p>Doxa brings stories from Christian and church history into an approachable, tactile format.</p><p><a href="/shop">Browse the collection</a></p></main>` },
   { route: '/contact', title: 'Contact and quote requests', description: 'Send a general enquiry or quote request to the Doxa team.', body: `<main>${nav}<h1>Start a conversation</h1><p>Ask about the collection or submit a quote request through the secure contact form.</p></main>` },
+  { route: '/policies/terms', title: 'Terms and Conditions', description: 'Read the current Terms and Conditions for using Doxa, creating an account and placing an order.', noindex: true, body: `<main>${nav}<h1>Terms and Conditions</h1><p>The published policy is loading securely.</p></main>` },
   { route: '/journal', title: 'The Doxa Journal', description: 'Progress updates and stories from behind the Doxa Treasury collection.', body: `<main>${nav}<h1>Stories behind the Treasury</h1><p>Progress updates, collection notes and deeper stories from the history of the Church.</p><article><h2><a href="/journal/building-the-doxa-treasury">Building the Doxa Treasury</a></h2><p>A first look at the ideas shaping Doxa.</p></article><article><h2><a href="/journal/why-history-belongs-in-your-hands">Why history belongs in your hands</a></h2><p>The thinking behind a tactile collection.</p></article></main>` },
   { route: '/journal/building-the-doxa-treasury', title: 'Building the Doxa Treasury', description: 'A first look at the ideas shaping Doxa: beautiful objects, carefully told stories and a collection designed to be revisited.', body: `<main>${nav}<nav aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/journal">Journal</a> / Building the Doxa Treasury</nav><article><h1>Building the Doxa Treasury</h1><p>Doxa began with a simple hope: to make the beauty and history of the Church easier to encounter, hold and share.</p></article></main>` },
   { route: '/journal/why-history-belongs-in-your-hands', title: 'Why history belongs in your hands', description: 'The thinking behind a tactile collection—and why a physical object can make a story feel newly present.', body: `<main>${nav}<nav aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/journal">Journal</a> / Why history belongs in your hands</nav><article><h1>Why history belongs in your hands</h1><p>A thoughtfully made card creates a different kind of encounter: an image to study, a story to remember and an object that can be shared.</p></article></main>` },
@@ -164,7 +165,10 @@ if (env.VITE_DATA_MODE === 'firebase' && env.VITE_FIREBASE_PROJECT_ID && env.VIT
 
 const productLinks = products.map((product) => `<article><h2><a href="/product/${escapeHtml(product.slug)}">${escapeHtml(product.name)}</a></h2><p>${escapeHtml(product.shortDescription || product.description)}</p></article>`).join('')
 routes[1].body = routes[1].body.replace('<div data-static-products></div>', `<section aria-label="Published products">${productLinks || '<p>The first collection is being prepared.</p>'}</section>`)
-if (journalArticles.length) routes[4].body = `<main>${nav}<h1>Stories behind the Treasury</h1><p>Progress updates, collection notes and deeper stories from the history of the Church.</p>${journalArticles.map((article) => `<article><h2><a href="/journal/${escapeHtml(article.slug)}">${escapeHtml(article.title)}</a></h2><p>${escapeHtml(article.excerpt)}</p></article>`).join('')}</main>`
+if (journalArticles.length) {
+  const journalPage = routes.find((page) => page.route === '/journal')
+  if (journalPage) journalPage.body = `<main>${nav}<h1>Stories behind the Treasury</h1><p>Progress updates, collection notes and deeper stories from the history of the Church.</p>${journalArticles.map((article) => `<article><h2><a href="/journal/${escapeHtml(article.slug)}">${escapeHtml(article.title)}</a></h2><p>${escapeHtml(article.excerpt)}</p></article>`).join('')}</main>`
+}
 
 // One owner per route: a later page can never silently overwrite an earlier
 // one, and every collision is reported instead of hidden.
@@ -182,7 +186,7 @@ async function writeClaimed(route, html) {
 }
 
 for (const page of routes) await writeClaimed(page.route, renderPage(page))
-const staticRoutes = routes.map((page) => page.route)
+const staticRoutes = routes.filter((page) => !page.noindex).map((page) => page.route)
 
 const journalRoutes = []
 for (const article of journalArticles) {

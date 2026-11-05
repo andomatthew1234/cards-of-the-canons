@@ -111,7 +111,7 @@ export function statusOf(record: { status?: unknown } | null | undefined): Subsc
   return status === 'pending' || status === 'subscribed' || status === 'unsubscribed' ? status : 'unknown'
 }
 
-/** Only an explicitly confirmed subscriber is ever mailable. */
+/** Only an explicitly consented, active subscriber is ever mailable. */
 export function isMailable(status: unknown): boolean {
   return status === 'subscribed'
 }
@@ -135,18 +135,21 @@ export function publicSubscribeResponse() {
  * confirmed address is idempotent, and unknown stored state fails closed.
  */
 export function resolveSubscribeOutcome(existing: { status?: unknown } | undefined): SubscribeDecision {
-  // No stored record yet: this is a first signup and starts pending.
-  if (!existing) return { status: 'pending', issueToken: true }
+  // Explicit consent activates a new subscription immediately. The token is
+  // now an unsubscribe token included in the informational welcome email.
+  if (!existing) return { status: 'subscribed', issueToken: true }
   const status = statusOf(existing)
-  if (status === 'pending') return { status: 'pending', issueToken: true }
+  // Migrate an older double-opt-in request when that person submits consent
+  // again through the current form.
+  if (status === 'pending') return { status: 'subscribed', issueToken: true }
   if (status === 'subscribed') return { status: 'subscribed', issueToken: false }
   // Existing suppression — or unusable stored state — always wins.
   return { status: 'unsubscribed', issueToken: false }
 }
 
-export function resolveAccountJoinStatus(existing: { status?: unknown } | undefined, emailVerified: boolean): SubscriberStatus {
+export function resolveAccountJoinStatus(existing: { status?: unknown } | undefined, _emailVerified: boolean): SubscriberStatus {
   if (statusOf(existing) === 'subscribed') return 'subscribed'
-  return emailVerified ? 'subscribed' : 'pending'
+  return 'subscribed'
 }
 
 /** Consent evidence is append-only and retained for a bounded, documented period. */
@@ -188,11 +191,43 @@ async function syncProviderSafely(email: string, subscribed: boolean) {
   }
 }
 
+export function subscriptionConfirmationMessage(email: string, unsubscribeToken: string, siteOrigin: string) {
+  const unsubscribeUrl = `${siteOrigin.replace(/\/$/, '')}/newsletter/unsubscribe?token=${unsubscribeToken}`
+  return {
+    to: email,
+    subject: 'You’re subscribed to Doxa updates',
+    text: [
+      'You are now subscribed to occasional Doxa news and updates.',
+      '',
+      'No further confirmation is required.',
+      '',
+      `Unsubscribe at any time: ${unsubscribeUrl}`,
+    ].join('\n'),
+  }
+}
+
+async function sendSubscriptionConfirmation(email: string, unsubscribeToken: string) {
+  try {
+    const delivery = await deliver(subscriptionConfirmationMessage(email, unsubscribeToken, publicSiteOriginParam.value()))
+    if (!delivery.sent) {
+      logger.warn('Newsletter subscription notice was not delivered.', {
+        provider: delivery.provider,
+        reason: delivery.reason,
+      })
+    }
+  } catch (error) {
+    logger.warn('Newsletter subscription notice could not be delivered.', {
+      provider: mailTransportParam.value(),
+      error: error instanceof Error ? error.message : 'unknown',
+    })
+  }
+}
+
 /**
  * Account membership is bound to the revocation-checked Firebase identity.
  * The browser never chooses which email address is stored. A verified account
- * can become mailable immediately after explicit consent; an unverified
- * account is recorded as pending and is never considered mailable.
+ * becomes mailable immediately after explicit consent. Account email
+ * verification remains a separate sign-in security control.
  */
 export const joinAccountMailingList = onCall(options, async (request) => {
   const caller = await authorizeRequest(request as CallableRequestLike)
@@ -203,7 +238,9 @@ export const joinAccountMailingList = onCall(options, async (request) => {
   const email = requireAccountEmail(caller)
   const subscriberId = subscriberIdForEmail(email)
   const now = Timestamp.now()
-  const finalStatus = await db.runTransaction(async (transaction) => {
+  const newUnsubscribeToken = generateConsentToken()
+  const newUnsubscribeTokenHash = hashConsentToken(newUnsubscribeToken)
+  const result = await db.runTransaction(async (transaction) => {
     const subscriberRef = db.collection('newsletterSubscribers').doc(subscriberId)
     const snapshot = await transaction.get(subscriberRef)
     const existing = snapshot.exists ? snapshot.data() : undefined
@@ -214,9 +251,8 @@ export const joinAccountMailingList = onCall(options, async (request) => {
     if (previousConfirmHash) transaction.delete(db.collection('_newsletterTokens').doc(previousConfirmHash))
 
     let unsubscribeTokenHash = typeof existing?.unsubscribeTokenHash === 'string' ? existing.unsubscribeTokenHash : ''
-    if (desiredStatus === 'subscribed' && !unsubscribeTokenHash) {
-      const unsubscribeToken = generateConsentToken()
-      unsubscribeTokenHash = hashConsentToken(unsubscribeToken)
+    if (!alreadySubscribed) {
+      unsubscribeTokenHash = newUnsubscribeTokenHash
       transaction.set(db.collection('_newsletterTokens').doc(unsubscribeTokenHash), {
         action: 'unsubscribe',
         subscriberId,
@@ -231,30 +267,30 @@ export const joinAccountMailingList = onCall(options, async (request) => {
       emailHash: subscriberId,
       consent: true,
       source: parsed.data.source,
-      status: alreadySubscribed ? 'subscribed' : desiredStatus,
+      status: 'subscribed',
       requestedAt: now,
       confirmTokenHash: null,
       unsubscribedAt: FieldValue.delete(),
       ...(unsubscribeTokenHash ? { unsubscribeTokenHash } : {}),
-      ...(desiredStatus === 'subscribed' ? { confirmedAt: now } : { confirmedAt: FieldValue.delete() }),
+      confirmedAt: alreadySubscribed && existing?.confirmedAt ? existing.confirmedAt : now,
       ...(snapshot.exists ? {} : { createdAt: now }),
       updatedAt: now,
     }, { merge: true })
     transaction.set(db.collection('newsletterConsentEvents').doc(), consentEvent(subscriberId, 'requested', parsed.data.source, now))
-    if (desiredStatus === 'subscribed' && !alreadySubscribed) {
+    if (!alreadySubscribed) {
       transaction.set(db.collection('newsletterConsentEvents').doc(), consentEvent(subscriberId, 'confirmed', parsed.data.source, now))
     }
-    return desiredStatus
+    return { status: desiredStatus, newlySubscribed: !alreadySubscribed }
   })
 
-  if (finalStatus === 'subscribed') await syncProviderSafely(email, true)
-  return accountStatus(email, caller.emailVerified, finalStatus)
+  await syncProviderSafely(email, true)
+  if (result.newlySubscribed) await sendSubscriptionConfirmation(email, newUnsubscribeToken)
+  return accountStatus(email, caller.emailVerified, result.status)
 })
 
 /**
- * Returns only the caller's own mailing-list state. If an account that opted
- * in while unverified has since verified its mailbox, this safely completes
- * that recorded consent and issues a future unsubscribe token atomically.
+ * Returns only the caller's own mailing-list state. Legacy pending records are
+ * upgraded immediately because confirmation is no longer required.
  */
 export const getMyMailingListStatus = onCall(options, async (request) => {
   const caller = await authorizeRequest(request as CallableRequestLike)
@@ -266,33 +302,35 @@ export const getMyMailingListStatus = onCall(options, async (request) => {
 
   const storedStatus = statusOf(snapshot.data())
   if (storedStatus === 'unknown') return accountStatus(email, caller.emailVerified, 'not_joined')
-  if (storedStatus !== 'pending' || !caller.emailVerified) return accountStatus(email, caller.emailVerified, storedStatus)
+  if (storedStatus !== 'pending') return accountStatus(email, caller.emailVerified, storedStatus)
 
   const now = Timestamp.now()
-  const resolvedStatus = await db.runTransaction(async (transaction): Promise<SubscriberStatus | 'not_joined'> => {
+  const migrationUnsubscribeToken = generateConsentToken()
+  const migrationUnsubscribeTokenHash = hashConsentToken(migrationUnsubscribeToken)
+  const migration = await db.runTransaction(async (transaction): Promise<{ status: SubscriberStatus | 'not_joined'; migrated: boolean }> => {
     const current = await transaction.get(subscriberRef)
-    if (!current.exists) return 'not_joined'
+    if (!current.exists) return { status: 'not_joined', migrated: false }
     const currentStatus = statusOf(current.data())
-    if (currentStatus !== 'pending') return currentStatus === 'unknown' ? 'not_joined' : currentStatus
+    if (currentStatus !== 'pending') {
+      return { status: currentStatus === 'unknown' ? 'not_joined' : currentStatus, migrated: false }
+    }
     const existing = current.data()
     const previousConfirmHash = typeof existing?.confirmTokenHash === 'string' ? existing.confirmTokenHash : ''
     if (previousConfirmHash) transaction.delete(db.collection('_newsletterTokens').doc(previousConfirmHash))
-    let unsubscribeTokenHash = typeof existing?.unsubscribeTokenHash === 'string' ? existing.unsubscribeTokenHash : ''
-    if (!unsubscribeTokenHash) {
-      unsubscribeTokenHash = hashConsentToken(generateConsentToken())
-      transaction.set(db.collection('_newsletterTokens').doc(unsubscribeTokenHash), {
-        action: 'unsubscribe', subscriberId, issuedAt: now,
-        expiresAt: Timestamp.fromMillis(unsubscribeTokenHorizon(now.toMillis())), usedAt: null,
-      })
-    }
+    transaction.set(db.collection('_newsletterTokens').doc(migrationUnsubscribeTokenHash), {
+      action: 'unsubscribe', subscriberId, issuedAt: now,
+      expiresAt: Timestamp.fromMillis(unsubscribeTokenHorizon(now.toMillis())), usedAt: null,
+    })
     transaction.set(subscriberRef, {
-      status: 'subscribed', confirmedAt: now, confirmTokenHash: null, unsubscribeTokenHash, updatedAt: now,
+      status: 'subscribed', confirmedAt: now, confirmTokenHash: null,
+      unsubscribeTokenHash: migrationUnsubscribeTokenHash, updatedAt: now,
     }, { merge: true })
     transaction.set(db.collection('newsletterConsentEvents').doc(), consentEvent(subscriberId, 'confirmed', 'account_settings', now))
-    return 'subscribed'
+    return { status: 'subscribed', migrated: true }
   })
-  if (resolvedStatus === 'subscribed') await syncProviderSafely(email, true)
-  return accountStatus(email, true, resolvedStatus)
+  if (migration.status === 'subscribed') await syncProviderSafely(email, true)
+  if (migration.migrated) await sendSubscriptionConfirmation(email, migrationUnsubscribeToken)
+  return accountStatus(email, caller.emailVerified, migration.status)
 })
 
 export const leaveAccountMailingList = onCall(options, async (request) => {
@@ -324,8 +362,8 @@ export const subscribeNewsletter = onCall(options, async (request) => {
   const email = normaliseNewsletterEmail(parsed.data.email)
   const subscriberId = subscriberIdForEmail(email)
   const source: NewsletterSource = parsed.data.source
-  const token = generateConsentToken()
-  const tokenHash = hashConsentToken(token)
+  const unsubscribeToken = generateConsentToken()
+  const unsubscribeTokenHash = hashConsentToken(unsubscribeToken)
   const now = Timestamp.now()
 
   const decision = await db.runTransaction(async (transaction) => {
@@ -333,18 +371,18 @@ export const subscribeNewsletter = onCall(options, async (request) => {
     const snapshot = await transaction.get(subscriberRef)
     const existing = snapshot.exists ? snapshot.data() : undefined
     const outcome = resolveSubscribeOutcome(existing)
-    if (!outcome.issueToken) return { outcome, issued: false }
+    if (!outcome.issueToken) return { outcome, activated: false }
 
-    // Exactly one live confirmation token: the previous unused one is removed
-    // in the same transaction, so an older link can never confirm a newer ask.
+    // Remove any unused legacy confirmation token and issue an unsubscribe
+    // token immediately. No confirmation action is required from the person.
     const previousHash = typeof existing?.confirmTokenHash === 'string' ? existing.confirmTokenHash : ''
-    if (previousHash && previousHash !== tokenHash) transaction.delete(db.collection('_newsletterTokens').doc(previousHash))
+    if (previousHash) transaction.delete(db.collection('_newsletterTokens').doc(previousHash))
 
-    transaction.set(db.collection('_newsletterTokens').doc(tokenHash), {
-      action: 'confirm',
+    transaction.set(db.collection('_newsletterTokens').doc(unsubscribeTokenHash), {
+      action: 'unsubscribe',
       subscriberId,
       issuedAt: now,
-      expiresAt: Timestamp.fromMillis(consentTokenExpiry(Date.now())),
+      expiresAt: Timestamp.fromMillis(unsubscribeTokenHorizon(now.toMillis())),
       usedAt: null,
     })
     transaction.set(subscriberRef, {
@@ -352,47 +390,27 @@ export const subscribeNewsletter = onCall(options, async (request) => {
       emailHash: subscriberId,
       consent: true,
       source,
-      status: 'pending',
+      status: 'subscribed',
       requestedAt: now,
-      confirmTokenHash: tokenHash,
+      confirmedAt: now,
+      confirmTokenHash: null,
+      unsubscribeTokenHash,
+      unsubscribedAt: FieldValue.delete(),
       ...(snapshot.exists ? {} : { createdAt: now }),
       updatedAt: now,
     }, { merge: true })
-    return { outcome, issued: true }
+    transaction.set(db.collection('newsletterConsentEvents').doc(), consentEvent(subscriberId, 'requested', source, now))
+    transaction.set(db.collection('newsletterConsentEvents').doc(), consentEvent(subscriberId, 'confirmed', source, now))
+    return { outcome, activated: true }
   })
 
-  if (decision.issued) {
-    await db.collection('newsletterConsentEvents').add(consentEvent(subscriberId, 'requested', source, now))
-  }
-
-  // Delivery only happens through an explicitly configured transport. Provider
-  // failures are kept in server logs rather than exposed to a public caller.
-  if (decision.issued) {
-    try {
-      const delivery = await deliver({
-        to: email,
-        subject: 'Confirm your Doxa subscription',
-        text: [
-          'Please confirm that you would like to receive occasional Doxa updates.',
-          '',
-          `Confirm: ${publicSiteOriginParam.value().replace(/\/$/, '')}/newsletter/confirm?token=${token}`,
-          '',
-          'If you did not request this, no action is needed and you will not be added to the list.',
-        ].join('\n'),
-      })
-      if (!delivery.sent) {
-        logger.warn('Newsletter confirmation was not delivered.', {
-          provider: delivery.provider,
-          reason: delivery.reason,
-        })
-      }
-    } catch (error) {
-      logger.warn('Newsletter confirmation could not be delivered.', { provider: mailTransportParam.value(), error: error instanceof Error ? error.message : 'unknown' })
-    }
+  if (decision.activated) {
+    await syncProviderSafely(email, true)
+    await sendSubscriptionConfirmation(email, unsubscribeToken)
   }
 
   // Do not expose the stored consent state or provider delivery outcome. A
-  // caller receives the same result for new, pending, confirmed and suppressed
+  // caller receives the same result for new, active and suppressed
   // addresses. Operational delivery failures remain visible in server logs.
   return publicSubscribeResponse()
 })

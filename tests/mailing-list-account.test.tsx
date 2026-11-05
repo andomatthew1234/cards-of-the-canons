@@ -42,15 +42,15 @@ describe('account mailing list', () => {
     await userEvent.click(screen.getByRole('checkbox', { name: /Yes, add me to the mailing list/i }))
     await userEvent.click(button)
     await waitFor(() => expect(mocks.join).toHaveBeenCalledWith('account_settings'))
-    expect(await screen.findByText('You are now on the mailing list.')).toBeInTheDocument()
+    expect(await screen.findByText(/You are now on the mailing list/i)).toHaveTextContent(/confirmation email has been sent for your records/i)
     expect(screen.queryByText('customer@example.com', { exact: false })).not.toBeInTheDocument()
   })
 
-  it('shows an honest pending state for an unverified account', async () => {
+  it('does not ask an unverified account for a second mailing-list confirmation', async () => {
     mocks.status.mockResolvedValueOnce({ email: 'customer@example.com', emailVerified: false, status: 'pending' })
     render(<MemoryRouter initialEntries={['/account/mailing-list']}><MailingListPage /></MemoryRouter>)
-    expect(await screen.findByText('Pending verification')).toBeInTheDocument()
-    expect(screen.getByText('Verify your account email')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Review email status' })).toHaveAttribute('href', '/account/security')
+    expect(await screen.findByRole('button', { name: 'Join mailing list' })).toBeInTheDocument()
+    expect(screen.queryByText('Pending verification')).not.toBeInTheDocument()
+    expect(screen.queryByText('Verify your account email')).not.toBeInTheDocument()
   })
 })

@@ -5,15 +5,16 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AccountCentreShell } from '../../components/account/AccountChrome'
-import { AccountPanel, AccountRequestError, AccountSettingRow, AccountStatus, AccountTextLink } from '../../components/account/AccountCentreUI'
+import { AccountFeedback, AccountPanel, AccountRequestError, AccountSettingRow, AccountStatus, AccountTextLink } from '../../components/account/AccountCentreUI'
 import { formatMoney } from '../../config'
 import { friendlyAuthError, useAuth } from '../../context/AuthContext'
-import { getAccountSecurityPolicy, getUserProfile } from '../../lib/accounts'
+import { getAccountSecurityPolicy, getUserProfile, saveCheckoutAndEnquiryAutofillPreference } from '../../lib/accounts'
 import { authenticatorFactorId } from '../../lib/authenticatorMfa'
 import { getCommunityAttentionCount } from '../../lib/community'
 import { getMyMailingListStatus, joinAccountMailingList, leaveAccountMailingList, listOrdersForUser } from '../../lib/data'
 import { maskEmail, providerName } from '../../lib/security'
-import type { AccountMailingListStatus, AccountSecurityPolicy, Order, UserProfile } from '../../types'
+import { getMyTreasury } from '../../lib/treasury'
+import type { AccountMailingListStatus, AccountSecurityPolicy, Order, TreasuryState, UserProfile } from '../../types'
 
 const initialPolicy: AccountSecurityPolicy = {
   version: 1,
@@ -36,34 +37,37 @@ function useAccountSummary() {
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [policy, setPolicy] = useState(initialPolicy)
   const [orders, setOrders] = useState<Order[]>([])
+  const [treasury, setTreasury] = useState<TreasuryState>({ editions: [], cards: [] })
   const [loading, setLoading] = useState(true)
-  const [errors, setErrors] = useState<Partial<Record<'profile' | 'policy' | 'orders', string>>>({})
+  const [errors, setErrors] = useState<Partial<Record<'profile' | 'policy' | 'orders' | 'treasury', string>>>({})
   const [requestVersion, setRequestVersion] = useState(0)
   useEffect(() => {
     if (!auth.user) { setLoading(false); return }
     let active = true
     setLoading(true)
     setErrors({})
-    Promise.allSettled([getUserProfile(auth.user.uid), getAccountSecurityPolicy(), listOrdersForUser(auth.user.uid)]).then(([profileResult, policyResult, ordersResult]) => {
+    Promise.allSettled([getUserProfile(auth.user.uid), getAccountSecurityPolicy(), listOrdersForUser(auth.user.uid), getMyTreasury()]).then(([profileResult, policyResult, ordersResult, treasuryResult]) => {
       if (!active) return
       if (profileResult.status === 'fulfilled') setProfile(profileResult.value)
       if (policyResult.status === 'fulfilled') setPolicy(policyResult.value.policy)
       if (ordersResult.status === 'fulfilled') setOrders(ordersResult.value)
+      if (treasuryResult.status === 'fulfilled') setTreasury(treasuryResult.value)
       setErrors({
         ...(profileResult.status === 'rejected' ? { profile: friendlyAuthError(profileResult.reason) } : {}),
         ...(policyResult.status === 'rejected' ? { policy: friendlyAuthError(policyResult.reason) } : {}),
         ...(ordersResult.status === 'rejected' ? { orders: friendlyAuthError(ordersResult.reason) } : {}),
+        ...(treasuryResult.status === 'rejected' ? { treasury: friendlyAuthError(treasuryResult.reason) } : {}),
       })
       setLoading(false)
     })
     return () => { active = false }
   }, [auth.user, requestVersion])
-  return { profile, policy, orders, loading, errors, retry: () => setRequestVersion((current) => current + 1) }
+  return { profile, policy, orders, treasury, loading, errors, retry: () => setRequestVersion((current) => current + 1) }
 }
 
 export function AccountOverview() {
   const auth = useAuth()
-  const { profile, policy, orders, loading, errors, retry } = useAccountSummary()
+  const { profile, policy, orders, treasury, loading, errors, retry } = useAccountSummary()
   const [communityAttention, setCommunityAttention] = useState(0)
   const [mailingList, setMailingList] = useState<AccountMailingListStatus | null>(null)
   const [mailingBusy, setMailingBusy] = useState(false)
@@ -75,6 +79,13 @@ export function AccountOverview() {
   const name = profile?.displayName || auth.user?.displayName || 'Collector'
   const providerLabel = auth.providers.map(providerName).join(', ') || 'Unavailable'
   const mailingEnabled = mailingList?.status === 'subscribed' || mailingList?.status === 'pending'
+  const treasuryCards = useMemo(() => treasury.cards
+    .filter((card) => card.status === 'published')
+    .sort((left, right) => Number(Boolean(right.collected)) - Number(Boolean(left.collected)) || left.sortOrder - right.sortOrder || left.number.localeCompare(right.number))
+    .slice(0, 12), [treasury.cards])
+  const treasuryCompletion = Math.max(0, Math.min(100, treasury.completionPercentage ?? 0))
+  const uniqueCollected = treasury.uniqueCollected ?? treasury.cards.filter((card) => card.collected).length
+  const totalAvailable = treasury.totalAvailable ?? treasury.cards.filter((card) => card.status === 'published').length
 
   useEffect(() => {
     if (!auth.user) return
@@ -98,7 +109,7 @@ export function AccountOverview() {
     try {
       const result = enabled ? await joinAccountMailingList('account_settings') : await leaveAccountMailingList()
       setMailingList(result)
-      setMailingFeedback(enabled ? (result.status === 'pending' ? 'Preference saved. Verify your email to activate it.' : 'Mailing list turned on.') : 'Mailing list turned off.')
+      setMailingFeedback(enabled ? 'Mailing list turned on. A confirmation email has been sent for your records.' : 'Mailing list turned off.')
     } catch {
       setMailingFeedback('This preference could not be updated. Please try again.')
     } finally {
@@ -121,7 +132,7 @@ export function AccountOverview() {
 
       <AccountPanel title="Mailing list" description="Choose whether to receive occasional collection news and updates." className="account-summary-panel account-overview-mailing">
         {overviewErrors.mailing && <AccountRequestError message={overviewErrors.mailing} onRetry={() => setOverviewRequestVersion((current) => current + 1)} />}
-        {!overviewErrors.mailing && <label className="account-overview-mailing-toggle"><span><strong>Mailing-list updates</strong><small>{mailingEnabled ? mailingList?.status === 'pending' ? 'Preference saved; email verification required.' : `On for ${maskEmail(mailingList?.email || auth.user?.email)}` : 'Currently turned off.'}</small></span><input type="checkbox" role="switch" aria-label="Receive mailing-list updates" checked={mailingEnabled} disabled={mailingBusy || mailingList === null} onChange={(event) => void updateMailingList(event.target.checked)} /><i aria-hidden="true" /></label>}
+        {!overviewErrors.mailing && <label className="account-overview-mailing-toggle"><span><strong>Mailing-list updates</strong><small>{mailingEnabled ? `On for ${maskEmail(mailingList?.email || auth.user?.email)}` : 'Currently turned off.'}</small></span><input type="checkbox" role="switch" aria-label="Receive mailing-list updates" checked={mailingEnabled} disabled={mailingBusy || mailingList === null} onChange={(event) => void updateMailingList(event.target.checked)} /><i aria-hidden="true" /></label>}
         {mailingFeedback && <p className="account-overview-mailing-feedback" role="status">{mailingFeedback}</p>}
         <AccountTextLink to="/account/mailing-list">Manage mailing list</AccountTextLink>
       </AccountPanel>
@@ -132,6 +143,25 @@ export function AccountOverview() {
         <dl className="account-checkup-list"><div><dt><Laptop aria-hidden="true" /> Recent account activity</dt><dd>{friendlyDate(auth.user?.metadata.lastSignInTime)}</dd></div><div><dt><LockKeyhole aria-hidden="true" /> Current login method</dt><dd>{providerLabel}</dd></div><div><dt><Mail aria-hidden="true" /> Account email</dt><dd>{auth.user?.emailVerified ? 'Verified' : 'Not verified'}</dd></div><div><dt><ShieldCheck aria-hidden="true" /> Additional protection</dt><dd>{authenticatorEnabled ? 'Authenticator enabled' : policy.methods.emailCode.status === 'enabled' ? 'Email code enabled' : 'Not configured'}</dd></div></dl>
         <AccountTextLink to="/account/security">Open security checkup</AccountTextLink>
       </AccountPanel>
+
+      {!loading && <AccountPanel title="Digital Treasury" description="See your revealed Saints and the collection still waiting to be discovered." className="account-summary-panel account-overview-treasury" ariaLabel="Digital Treasury overview">
+        {errors.treasury ? <AccountRequestError message={errors.treasury} onRetry={retry} /> : <>
+          <div className="account-treasury-summary">
+            <div className="account-treasury-completion"><strong>{treasuryCompletion}%</strong><span>{uniqueCollected} of {totalAvailable} unique Saints revealed</span></div>
+            <div className="account-treasury-progress" role="progressbar" aria-label="Treasury collection completion" aria-valuemin={0} aria-valuemax={100} aria-valuenow={treasuryCompletion}><i style={{ width: `${treasuryCompletion}%` }} /></div>
+          </div>
+          {treasuryCards.length ? <ul className="account-treasury-rail" aria-label="Twelve potential Saint unlocks">
+            {treasuryCards.map((card) => <li key={card.id} className={card.collected ? 'revealed' : 'locked'}>
+              <div className="account-treasury-card-art">
+                {card.collected && card.imageUrl ? <img src={card.imageUrl} alt={card.imageAlt || card.title} loading="lazy" /> : <LockKeyhole aria-hidden="true" />}
+              </div>
+              <strong>{card.collected ? card.title : 'Locked Saint'}</strong>
+              <small>{card.collected ? `${card.quantity || 1} ${card.quantity === 1 ? 'copy' : 'copies'}` : `Card ${card.number}`}</small>
+            </li>)}
+          </ul> : <div className="account-treasury-empty"><LockKeyhole aria-hidden="true" /><p>Your first collection will appear here when its Saints are published.</p></div>}
+        </>}
+        <AccountTextLink to="/account/treasury">Open My Treasury</AccountTextLink>
+      </AccountPanel>}
     </div>
   </AccountCentreShell>
 }
@@ -162,17 +192,66 @@ export function AccountOrdersPage() {
 
 export function AccountDevicesPage() {
   const auth = useAuth()
+  const [signOutBusy, setSignOutBusy] = useState(false)
+  const [signOutError, setSignOutError] = useState('')
+  async function signOutCurrentSession() {
+    if (signOutBusy) return
+    setSignOutBusy(true)
+    setSignOutError('')
+    try {
+      await auth.logOut()
+    } catch (error) {
+      setSignOutError(friendlyAuthError(error))
+      setSignOutBusy(false)
+    }
+  }
   return <AccountCentreShell title="Sessions & devices" eyebrow="Account activity" description="Review the session information that can be determined truthfully for this account.">
+    {signOutError && <AccountFeedback tone="error">{signOutError}</AccountFeedback>}
     <AccountPanel title="Current session" description="Firebase securely maintains your signed-in browser session.">
-      <AccountSettingRow icon={<Laptop aria-hidden="true" />} title="This browser" tone="positive" status={<AccountStatus tone="positive"><CheckCircle2 aria-hidden="true" /> Current session</AccountStatus>} description={<><p>Last authenticated {friendlyDate(auth.user?.metadata.lastSignInTime)}.</p><small>Browser, device model and location are not collected here, so they are not guessed.</small></>} action={<button className="account-text-button" onClick={() => void auth.logOut()}>Sign out</button>} />
+      <AccountSettingRow icon={<Laptop aria-hidden="true" />} title="This browser" tone="positive" status={<AccountStatus tone="positive"><CheckCircle2 aria-hidden="true" /> Current session</AccountStatus>} description={<><p>Last authenticated {friendlyDate(auth.user?.metadata.lastSignInTime)}.</p><small>Browser, device model and location are not collected here, so they are not guessed.</small></>} action={<button className="account-text-button" disabled={signOutBusy} onClick={() => void signOutCurrentSession()}>{signOutBusy ? 'Signing out…' : 'Sign out'}</button>} />
     </AccountPanel>
   </AccountCentreShell>
 }
 
 export function AccountPrivacyPage() {
+  const auth = useAuth()
+  const [autofillEnabled, setAutofillEnabled] = useState(true)
+  const [autofillLoading, setAutofillLoading] = useState(true)
+  const [autofillBusy, setAutofillBusy] = useState(false)
+  const [autofillFeedback, setAutofillFeedback] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+
+  useEffect(() => {
+    if (!auth.user) { setAutofillLoading(false); return }
+    let active = true
+    setAutofillLoading(true)
+    void getUserProfile(auth.user.uid)
+      .then((profile) => { if (active) setAutofillEnabled(profile?.preferences?.checkoutAndEnquiryAutofill !== false) })
+      .catch((error) => { if (active) setAutofillFeedback({ tone: 'error', text: friendlyAuthError(error) }) })
+      .finally(() => { if (active) setAutofillLoading(false) })
+    return () => { active = false }
+  }, [auth.user])
+
+  async function updateAutofillPreference() {
+    if (!auth.user || autofillBusy) return
+    const next = !autofillEnabled
+    setAutofillBusy(true)
+    setAutofillFeedback(null)
+    try {
+      await saveCheckoutAndEnquiryAutofillPreference(auth.user.uid, next)
+      setAutofillEnabled(next)
+      setAutofillFeedback({ tone: 'success', text: next ? 'Account-detail autofill is enabled.' : 'Account-detail autofill is disabled.' })
+    } catch (error) {
+      setAutofillFeedback({ tone: 'error', text: friendlyAuthError(error) })
+    } finally {
+      setAutofillBusy(false)
+    }
+  }
+
   return <AccountCentreShell title="Privacy & data" eyebrow="Your information" description="Understand what account data is stored and how to ask questions about it.">
+    {autofillFeedback && <AccountFeedback tone={autofillFeedback.tone}>{autofillFeedback.text}</AccountFeedback>}
     <AccountPanel title="Private account data" description="Access is protected by your authenticated account identity.">
       <AccountSettingRow icon={<UserRound aria-hidden="true" />} title="Profile information" description={<><p>Your name, email address and optional phone number support your account and enquiries.</p><small>Only you and authorised administrators can access private profile records.</small></>} action={<AccountTextLink to="/account/personal-info">Review details</AccountTextLink>} />
+      <AccountSettingRow icon={<Database aria-hidden="true" />} title="Checkout and enquiry autofill" tone={autofillEnabled ? 'positive' : 'neutral'} status={<AccountStatus tone={autofillEnabled ? 'positive' : 'neutral'}>{autofillLoading ? 'Loading…' : autofillEnabled ? 'Enabled' : 'Disabled'}</AccountStatus>} description={<><p>{autofillEnabled ? 'Your account email and profile details can be filled into checkout and enquiry forms.' : 'Checkout and enquiry forms will ask you to enter details manually.'}</p><small>You can still choose to use your account details on an individual enquiry.</small></>} action={<button type="button" className="account-text-button" disabled={autofillLoading || autofillBusy} onClick={() => void updateAutofillPreference()}>{autofillBusy ? 'Saving…' : autofillEnabled ? 'Turn off' : 'Turn on'}</button>} />
       <AccountSettingRow icon={<Package aria-hidden="true" />} title="Order records" description={<><p>Orders connected to your identity are available from your purchase history.</p><small>Completed business records may be retained where operationally or legally required.</small></>} action={<AccountTextLink to="/account/orders">View orders</AccountTextLink>} />
       <AccountSettingRow icon={<LockKeyhole aria-hidden="true" />} title="Authentication data" description={<><p>Firebase Authentication manages sign-in credentials and enrolled security factors.</p><small>Passwords and authenticator secrets are not displayed by this Account Centre.</small></>} />
     </AccountPanel>

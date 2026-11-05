@@ -1,8 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
-import { coalesce, isLiveStripeKey, readTerminalCancel, resolveCheckoutTransition, writeTerminalCancel } from './checkout'
+import { checkoutAutofillEnabledFromProfile, coalesce, isLiveStripeKey, readTerminalCancel, resolveCheckoutTransition, stripeCustomerEmail, writeTerminalCancel } from './checkout'
 
 
 describe('checkout payment transitions', () => {
+  it('defaults checkout autofill on and respects a customer opt-out', () => {
+    expect(checkoutAutofillEnabledFromProfile(undefined)).toBe(true)
+    expect(checkoutAutofillEnabledFromProfile({ preferences: {} })).toBe(true)
+    expect(checkoutAutofillEnabledFromProfile({ preferences: { checkoutAndEnquiryAutofill: true } })).toBe(true)
+    expect(checkoutAutofillEnabledFromProfile({ preferences: { checkoutAndEnquiryAutofill: false } })).toBe(false)
+    expect(stripeCustomerEmail({ customerEmail: '' }, 'account@example.com')).toBeUndefined()
+    expect(stripeCustomerEmail({ customerEmail: 'account@example.com' }, 'fallback@example.com')).toBe('account@example.com')
+    expect(stripeCustomerEmail(undefined, 'legacy@example.com')).toBe('legacy@example.com')
+  })
+
   it('commits a reserved order only after confirmed payment', () => {
     expect(resolveCheckoutTransition('checkout.session.completed', 'paid', 'reserved')).toEqual({
       action: 'commit', orderStatus: 'paid', inventoryState: 'committed',

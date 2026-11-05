@@ -1,6 +1,6 @@
 import { httpsCallable } from 'firebase/functions'
 import { isFirebaseMode } from '../config'
-import type { TreasuryAdminState, TreasuryCard, TreasuryEdition, TreasuryState } from '../types'
+import type { TreasuryAdminCustomerState, TreasuryAdminState, TreasuryCard, TreasuryEdition, TreasuryRedemptionResult, TreasuryRedemptionSession, TreasuryState } from '../types'
 import { getFirebaseServices } from './firebase'
 
 const emptyState: TreasuryState = { editions: [], cards: [] }
@@ -16,6 +16,44 @@ export async function redeemTreasuryCode(code: string) {
   const { functions } = getFirebaseServices()
   const result = await httpsCallable<{ code: string }, { card: TreasuryCard; edition: TreasuryEdition; newCard: boolean; retried: boolean }>(functions, 'redeemTreasuryCode')({ code })
   return result.data
+}
+
+export async function beginTreasuryRedemption(orderId: string): Promise<TreasuryRedemptionSession> {
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<{ orderId: string }, TreasuryRedemptionSession>(functions, 'beginTreasuryRedemption')({ orderId })).data
+}
+
+export async function redeemPhysicalTreasuryCards(orderId: string, codes: string[], requestId = crypto.randomUUID()): Promise<TreasuryRedemptionResult> {
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<{ orderId: string; codes: string[]; requestId: string }, TreasuryRedemptionResult>(functions, 'redeemPhysicalTreasuryCards')({ orderId, codes, requestId })).data
+}
+
+export async function transferTreasuryCard(instanceId: string, recipientEmail: string, requestId = crypto.randomUUID()) {
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<{ instanceId: string; recipientEmail: string; requestId: string }, { transferred: boolean; recipientEmail: string }>(functions, 'transferTreasuryCard')({ instanceId, recipientEmail, requestId })).data
+}
+
+export async function assignPhysicalCodesToOrder(orderId: string, codes: string[], requestId = crypto.randomUUID()) {
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<{ orderId: string; codes: string[]; requestId: string }, { assigned: number; eligible: number }>(functions, 'assignPhysicalCodesToOrder')({ orderId, codes, requestId })).data
+}
+
+export async function getTreasuryCustomerAdmin(uid: string): Promise<TreasuryAdminCustomerState> {
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<{ uid: string }, TreasuryAdminCustomerState>(functions, 'getTreasuryCustomerAdmin')({ uid })).data
+}
+
+export type TreasuryAdminAction =
+  | { action: 'ban' | 'unban'; uid: string; reason: string }
+  | { action: 'grant_attempts'; uid: string; orderId: string; amount: number; reason: string }
+  | { action: 'set_allowance'; uid: string; orderId: string; eligibleCodeCount: number; reason: string }
+  | { action: 'unassign_code'; uid: string; orderId: string; code: string; reason: string }
+  | { action: 'add_card'; uid: string; cardId: string; reason: string }
+  | { action: 'remove_card'; uid: string; instanceId: string; reason: string }
+
+export async function adminManageTreasury(input: TreasuryAdminAction) {
+  const { functions } = getFirebaseServices()
+  return (await httpsCallable<TreasuryAdminAction, { updated: boolean }>(functions, 'adminManageTreasury')(input)).data
 }
 
 export async function getTreasuryAdminState(): Promise<TreasuryAdminState> {

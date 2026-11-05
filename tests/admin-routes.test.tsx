@@ -36,6 +36,7 @@ vi.mock('../src/lib/data', () => ({
   deleteProduct: vi.fn().mockResolvedValue(undefined),
   upsertProduct: vi.fn().mockResolvedValue(undefined),
   uploadProductImage: vi.fn().mockResolvedValue('https://example.com/image.jpg'),
+  listProductMedia: vi.fn().mockResolvedValue([]),
   uploadPageImage: vi.fn().mockResolvedValue('https://example.com/page-image.jpg'),
   getPageContent: vi.fn().mockResolvedValue(null),
   savePageContent: vi.fn().mockResolvedValue(undefined),
@@ -55,6 +56,18 @@ vi.mock('../src/lib/data', () => ({
   retryJournalNotification: vi.fn(),
   deleteJournalArticle: vi.fn(),
   uploadJournalImage: vi.fn(),
+  getSocialMediaLinksEditorState: vi.fn().mockResolvedValue({
+    draft: { status:'draft',revision:0,heading:'Follow',links:[
+      { id:'instagram',label:'Instagram',url:'',visible:false },
+      { id:'tiktok',label:'TikTok',url:'',visible:false },
+      { id:'youtube',label:'YouTube',url:'',visible:false },
+      { id:'facebook',label:'Facebook',url:'',visible:false },
+      { id:'x',label:'X',url:'',visible:false },
+    ],updatedAt:null },
+    published: null,
+  }),
+  saveSocialMediaLinksDraft: vi.fn(),
+  publishSocialMediaLinks: vi.fn(),
 }))
 
 vi.mock('../src/lib/community', () => ({
@@ -67,6 +80,9 @@ vi.mock('../src/lib/community', () => ({
 
 vi.mock('../src/lib/treasury', () => ({
   getTreasuryAdminState: vi.fn().mockResolvedValue({ editions: [], cards: [], batches: [] }),
+  getTreasuryCustomerAdmin: vi.fn().mockResolvedValue({ editions: [], cards: [], accountId:'customer-1', banned:false, orders:[], transactions:[] }),
+  adminManageTreasury: vi.fn().mockResolvedValue({ updated:true }),
+  assignPhysicalCodesToOrder: vi.fn().mockResolvedValue({ assigned:1,eligible:1 }),
   saveTreasuryEdition: vi.fn().mockResolvedValue('edition-1'),
   saveTreasuryCard: vi.fn().mockResolvedValue('card-1'),
   generateTreasuryCodeBatch: vi.fn().mockResolvedValue({ batchId:'batch-1',codes:['DXA-AAAAA-BBBBB-CCCCC-DDDDD-EEEEE'] }),
@@ -87,6 +103,9 @@ describe('routed administrator workspace', () => {
     vi.mocked(dataApi.listEnquiries).mockReset().mockResolvedValue([])
     vi.mocked(dataApi.listSubscribers).mockReset().mockResolvedValue([])
     vi.mocked(dataApi.dismissTestOrder).mockReset().mockResolvedValue({ dismissed: true })
+    vi.mocked(dataApi.upsertProduct).mockReset().mockResolvedValue(undefined)
+    vi.mocked(dataApi.uploadProductImage).mockReset().mockResolvedValue('https://example.com/product-image.jpg')
+    vi.mocked(dataApi.listProductMedia).mockReset().mockResolvedValue([])
     vi.mocked(communityApi.listAdminCommunitySurveys).mockReset().mockResolvedValue([])
     vi.mocked(treasuryApi.getTreasuryAdminState).mockReset().mockResolvedValue({ editions: [], cards: [], batches: [] })
   })
@@ -107,6 +126,64 @@ describe('routed administrator workspace', () => {
     expect(screen.getByRole('form')).toBeInTheDocument()
     expect(screen.getByLabelText('Name')).toBeInTheDocument()
     expect(screen.getByLabelText('Status')).toBeInTheDocument()
+  })
+
+  it('uploads a new product image before a URL slug has been entered', async () => {
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined)
+    renderAdmin('/admin/products/new')
+    const image = new File(['product image'], 'front.webp', { type: 'image/webp' })
+    await userEvent.upload(await screen.findByLabelText('Upload new image'), image)
+    await waitFor(() => expect(dataApi.uploadProductImage).toHaveBeenCalledTimes(1))
+    expect(alert).not.toHaveBeenCalledWith('Add a URL slug before uploading an image.')
+    alert.mockRestore()
+  })
+
+  it('selects and saves an existing central Media Library image without entering a URL or slug', async () => {
+    vi.mocked(dataApi.listProductMedia).mockResolvedValueOnce([{
+      path: 'page-images/library/1790000000000-a1b2c3d4-front-card.webp',
+      size: 1200,
+      contentType: 'image/webp',
+      createdAt: '2026-10-27T00:00:00.000Z',
+      updatedAt: '2026-10-27T00:00:00.000Z',
+      url: 'https://example.com/front-card.webp',
+    }])
+    renderAdmin('/admin/products/new')
+    await userEvent.click(await screen.findByRole('button', { name: 'Select front card' }))
+    expect(screen.getByRole('img', { name: 'front card' })).toHaveAttribute('src', 'https://example.com/front-card.webp')
+    expect(screen.getByLabelText(/^Image description/)).toHaveValue('front card')
+    await userEvent.type(screen.getByLabelText('Name'), 'Media Library Pack')
+    await userEvent.type(screen.getByLabelText(/^Short description/), 'A pack using a library image.')
+    await userEvent.type(screen.getByLabelText('Full description'), 'A collectible pack using an existing Media Library image.')
+    await userEvent.click(screen.getByRole('button', { name: 'Save product' }))
+    await waitFor(() => expect(dataApi.upsertProduct).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'media-library-pack',
+      slug: 'media-library-pack',
+      imageUrl: 'https://example.com/front-card.webp',
+      imageAlt: 'front card',
+    })))
+    expect(screen.queryByLabelText('URL slug')).not.toBeInTheDocument()
+  })
+
+  it('creates a product with an automatic URL instead of asking for a slug', async () => {
+    renderAdmin('/admin/products/new')
+    await userEvent.type(await screen.findByLabelText('Name'), 'Pilgrim Pack')
+    await userEvent.type(screen.getByLabelText(/^Short description/), 'A compact card pack.')
+    await userEvent.type(screen.getByLabelText('Full description'), 'A compact card pack for collectors.')
+    await userEvent.click(screen.getByRole('button', { name: 'Save product' }))
+    await waitFor(() => expect(dataApi.upsertProduct).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'pilgrim-pack',
+      slug: 'pilgrim-pack',
+      name: 'Pilgrim Pack',
+    })))
+    expect(screen.queryByLabelText('URL slug')).not.toBeInTheDocument()
+  })
+
+  it('opens the dedicated social media settings editor', async () => {
+    renderAdmin('/admin/settings/social-media')
+    expect(await screen.findByRole('heading', { name: 'Social media links', level: 1 })).toBeInTheDocument()
+    expect(screen.getAllByLabelText(/^Profile URL/)).toHaveLength(5)
+    expect(screen.getByRole('button', { name: 'Publish' })).toBeDisabled()
+    expect(screen.getByText('No profiles selected yet.')).toBeInTheDocument()
   })
 
   it('offers provider-appropriate reauthentication when Journal publishing needs a fresh session', async () => {
@@ -144,13 +221,13 @@ describe('routed administrator workspace', () => {
     expect(screen.queryByRole('heading', { name: 'Confirm it’s you' })).not.toBeInTheDocument()
   })
 
-  it('opens the Treasury workspace with set, card and code management', async () => {
+  it('opens the Treasury workspace with set, card and physical activity management', async () => {
     renderAdmin('/admin/treasury')
-    expect(await screen.findByRole('heading', { name: 'Treasury & card codes', level: 1 })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Treasury & physical cards', level: 1 })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Collection sets' })).toHaveClass('active')
     expect(screen.getByRole('heading', { name: 'Create a collection set' })).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Card codes' }))
-    expect(screen.getByRole('heading', { name: 'Generate card codes' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Activity' }))
+    expect(screen.getByRole('heading', { name: 'Treasury activity' })).toBeInTheDocument()
   })
 
   it('opens Community and the dedicated survey builder', async () => {

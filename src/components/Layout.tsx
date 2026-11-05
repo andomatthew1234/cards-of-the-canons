@@ -9,6 +9,7 @@ import { getPublishedLegalPolicies, legalPolicyPath } from "../legal/policies";
 import { siteThemeCssVariables } from "../lib/siteTheme";
 import type { SiteTheme } from "../types";
 import { PageTransition } from "./PageTransition";
+import { socialIconById } from "./SocialPlatformIcon";
 
 function isExternalDestination(destination: string) {
   return destination.startsWith("https://");
@@ -17,6 +18,11 @@ function isExternalDestination(destination: string) {
 const SOCIAL_LINK_NAME = /^(?:instagram|instragram|tiktok|you\s*tube|facebook|x|twitter)$/i;
 const PLACEHOLDER_SOCIAL_PATH = /(?:coming[-_ ]?soon|placeholder|replace[-_ ]?me|todo)/i;
 
+export function isSocialFooterLink(item: { id: string; label: string }) {
+  const name = `${item.id} ${item.label}`.trim();
+  return SOCIAL_LINK_NAME.test(item.id.trim()) || SOCIAL_LINK_NAME.test(item.label.trim()) || SOCIAL_LINK_NAME.test(name);
+}
+
 export function shouldRenderFooterLink(item: {
   id: string;
   label: string;
@@ -24,8 +30,7 @@ export function shouldRenderFooterLink(item: {
   visible: boolean;
 }) {
   if (!item.visible) return false;
-  const name = `${item.id} ${item.label}`.trim();
-  if (!SOCIAL_LINK_NAME.test(item.id.trim()) && !SOCIAL_LINK_NAME.test(item.label.trim()) && !SOCIAL_LINK_NAME.test(name)) {
+  if (!isSocialFooterLink(item)) {
     return true;
   }
 
@@ -115,6 +120,7 @@ export function Layout({
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const navigationRef = useRef<HTMLElement>(null);
   const brandRef = useRef<HTMLAnchorElement>(null);
   const headerActionsRef = useRef<HTMLDivElement>(null);
@@ -122,9 +128,16 @@ export function Layout({
   const footerRef = useRef<HTMLElement>(null);
   const { count } = useCart();
   const { isAdmin } = useAuth();
-  const { website: managedWebsite, ready: contentReady } = useSiteContent();
+  const { website: managedWebsite, socialMedia, ready: contentReady } = useSiteContent();
   const theme = useSiteTheme();
   const { pathname } = useLocation();
+  const displayedPath = previewPath ?? pathname;
+  const normalisedDisplayedPath = displayedPath.replace(/\/+$/, "") || "/";
+  const isHome = normalisedDisplayedPath === "/";
+  // Only pages whose opening section is designed around integrated artwork
+  // receive the transparent-to-surface header treatment. Plain/light page
+  // introductions keep a readable surface header from the outset.
+  const hasIntegratedHero = isHome || normalisedDisplayedPath === "/about" || normalisedDisplayedPath === "/journal";
 
   useEffect(() => setOpen(false), [pathname]);
   useEffect(() => {
@@ -188,23 +201,25 @@ export function Layout({
     if (meta) meta.content = theme.palette.ink;
   }, [previewMode, theme.palette.ink]);
   useEffect(() => {
-    if (previewMode) return;
     let frame = 0;
+    const previewScroller = previewMode
+      ? shellRef.current?.closest<HTMLElement>(".website-preview-shell")
+      : null;
+    const scrollTarget: Window | HTMLElement = previewScroller ?? window;
+    const scrollPosition = () => previewScroller?.scrollTop ?? window.scrollY;
     const update = () => {
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => setScrolled(window.scrollY > 36));
+      frame = requestAnimationFrame(() => setScrolled(scrollPosition() > 36));
     };
     update();
-    window.addEventListener("scroll", update, { passive: true });
+    scrollTarget.addEventListener("scroll", update, { passive: true });
     return () => {
       cancelAnimationFrame(frame);
-      window.removeEventListener("scroll", update);
+      scrollTarget.removeEventListener("scroll", update);
     };
-  }, [previewMode]);
+  }, [normalisedDisplayedPath, previewMode]);
 
-  const displayedPath = previewPath ?? pathname;
-  const isHome = displayedPath === "/";
-  const headerState = isHome && !scrolled ? "is-overlay" : "is-surface";
+  const headerState = hasIntegratedHero && !scrolled ? "is-overlay" : "is-surface";
 
   const footer = theme.footer;
   const publishedLegalPolicies = getPublishedLegalPolicies();
@@ -300,7 +315,20 @@ export function Layout({
       ],
     },
   ];
-  const visibleFooterGroups = getVisibleFooterGroups(footerGroups, isAdmin);
+  // Once the dedicated settings have been published they become the single
+  // source of truth. Until then, retain valid legacy social links so an
+  // existing footer is never silently stripped during migration.
+  const footerGroupsForDisplay = socialMedia ? footerGroups.map((group) => ({
+    ...group,
+    links: group.links.filter((link) => !isSocialFooterLink(link)),
+  })) : footerGroups;
+  const visibleFooterGroups = getVisibleFooterGroups(footerGroupsForDisplay, isAdmin);
+  const visibleSocialLinks = (socialMedia?.links ?? []).filter((link) => shouldRenderFooterLink({
+    id: link.id,
+    label: link.label,
+    path: link.url,
+    visible: link.visible,
+  }));
   if (contentReady === false && !previewMode) {
     return (
       <div className="site-shell public-site-loading" data-theme-typography={theme.typography} style={siteThemeCssVariables(theme)} aria-busy="true">
@@ -310,7 +338,8 @@ export function Layout({
   }
   return (
     <div
-      className={`site-shell ${isHome ? "home-shell" : "interior-shell"}`}
+      ref={shellRef}
+      className={`site-shell ${isHome ? "home-shell" : `interior-shell${hasIntegratedHero ? " immersive-shell" : ""}`}`}
       data-theme-typography={theme.typography}
       style={siteThemeCssVariables(theme)}
     >
@@ -329,7 +358,7 @@ export function Layout({
           </div>
         )}
       <header
-        className={`header public-header ${isHome ? "home-header" : ""} ${headerState} ${scrolled ? "is-scrolled" : ""}`}
+        className={`header public-header ${hasIntegratedHero ? "home-header immersive-header" : ""} ${headerState} ${scrolled ? "is-scrolled" : ""}`}
         data-editor-target={previewMode ? "header" : undefined}
       >
         <Link
@@ -411,16 +440,26 @@ export function Layout({
               ))}
           </div>
         ))}
-        {publishedLegalPolicies.length > 0 && (
-          <div className="footer-link-group">
+        </div>
+        <div className="footer-support-columns">
+        {visibleSocialLinks.length > 0 && <div className="footer-link-group footer-social-links">
+            <h2>{socialMedia?.heading || "Follow"}</h2>
+            {visibleSocialLinks.map((item) => {
+              const Icon = socialIconById[item.id];
+              return <DestinationLink key={item.id} destination={item.url} className="footer-social-link">
+                <Icon aria-hidden="true" />
+                <span>{item.label}</span>
+              </DestinationLink>;
+            })}
+        </div>}
+        <div className="footer-link-group footer-legal-links">
             <h2>Legal</h2>
-            {publishedLegalPolicies.map((policy) => (
+            <Link to={legalPolicyPath("terms")}>Terms and Conditions</Link>
+            {publishedLegalPolicies.filter((policy) => policy.slug !== "terms").map((policy) => (
               <Link key={policy.slug} to={legalPolicyPath(policy.slug)}>
                 {policy.navigationLabel}
               </Link>
             ))}
-          </div>
-        )}
         </div>
         <div className="footer-contact">
           <h2>Contact</h2>
@@ -428,10 +467,12 @@ export function Layout({
           <Link className="footer-contact-button" to="/contact">Contact us <ArrowRight aria-hidden="true" /></Link>
           <a className="footer-contact-email" href={`mailto:${website?.branding.publicContactEmail ?? "info@doxatreasury.com"}`}>{website?.branding.publicContactEmail ?? "info@doxatreasury.com"}</a>
         </div>
+        </div>
         <p className="footer-note">
           © {new Date().getFullYear()} {footer.brandName}.{" "}
           {footer.copyrightText}
         </p>
+        <p className="footer-abn">ABN 57 919 748 380 NSW, Australia</p>
       </footer>
     </div>
   );

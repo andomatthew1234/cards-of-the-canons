@@ -8,7 +8,7 @@ beforeAll(async () => { env = await initializeTestEnvironment({ projectId, fires
 afterAll(async () => env?.cleanup())
 beforeEach(async () => env.clearFirestore())
 
-const product = { slug:'sample',name:'Sample',shortDescription:'Sample description',description:'Longer sample description',priceCents:1200,currency:'AUD',imageUrl:'/images/sample.svg',imageAlt:'Sample artwork',category:'Packs',featured:true,stock:null,status:'published' }
+const product = { slug:'sample',name:'Sample',shortDescription:'Sample description',description:'Longer sample description',priceCents:1200,currency:'AUD',imageUrl:'/images/sample.svg',imageAlt:'Sample artwork',category:'Packs',featured:true,stock:null,treasuryCardsPerUnit:1,status:'published' }
 
 describe('Firestore access boundaries', () => {
   it('allows public published reads but hides drafts', async () => {
@@ -30,9 +30,33 @@ describe('Firestore access boundaries', () => {
     await assertFails(getDoc(doc(env.authenticatedContext('customer-b').firestore(), 'orders/order-a')))
   })
   it('allows only a custom-claim administrator to write valid products', async () => {
-    await assertSucceeds(setDoc(doc(env.authenticatedContext('admin', { admin:true }).firestore(), 'products/new'), product))
+    const adminDb = env.authenticatedContext('admin', { admin:true }).firestore()
+    await assertSucceeds(setDoc(doc(adminDb, 'products/new'), product))
+    await assertSucceeds(setDoc(doc(adminDb, 'products/ordered'), { ...product, sortOrder:25 }))
+    await assertSucceeds(setDoc(doc(adminDb, 'products/custom-category'), { ...product, category:'Limited editions', sortOrder:42 }))
+    const customCategory = await getDoc(doc(adminDb, 'products/custom-category'))
+    expect(customCategory.data()).toMatchObject({ category:'Limited editions', sortOrder:42 })
+    await assertFails(setDoc(doc(adminDb, 'products/order-negative'), { ...product, sortOrder:-1 }))
+    await assertFails(setDoc(doc(adminDb, 'products/order-fraction'), { ...product, sortOrder:1.5 }))
+    await assertFails(setDoc(doc(adminDb, 'products/order-string'), { ...product, sortOrder:'10' }))
     await assertFails(setDoc(doc(env.authenticatedContext('customer').firestore(), 'products/new'), product))
     await assertFails(setDoc(doc(env.authenticatedContext('admin', { admin:true }).firestore(), 'products/bad'), { ...product, extraData:'pollution' }))
+  })
+  it('requires an integer Treasury-card quantity within the supported product range', async () => {
+    const adminDb = env.authenticatedContext('admin', { admin:true }).firestore()
+    const { treasuryCardsPerUnit: omitted, ...withoutTreasuryQuantity } = product
+    void omitted
+
+    await assertSucceeds(setDoc(doc(adminDb, 'products/treasury-zero'), { ...product, treasuryCardsPerUnit:0 }))
+    await assertSucceeds(setDoc(doc(adminDb, 'products/treasury-maximum'), { ...product, treasuryCardsPerUnit:50 }))
+    await assertFails(setDoc(doc(adminDb, 'products/treasury-missing'), withoutTreasuryQuantity))
+    await assertFails(setDoc(doc(adminDb, 'products/treasury-string'), { ...product, treasuryCardsPerUnit:'1' }))
+    await assertFails(setDoc(doc(adminDb, 'products/treasury-fraction'), { ...product, treasuryCardsPerUnit:1.5 }))
+    await assertFails(setDoc(doc(adminDb, 'products/treasury-negative'), { ...product, treasuryCardsPerUnit:-1 }))
+    await assertFails(setDoc(doc(adminDb, 'products/treasury-too-large'), { ...product, treasuryCardsPerUnit:51 }))
+
+    await assertSucceeds(updateDoc(doc(adminDb, 'products/treasury-maximum'), { treasuryCardsPerUnit:8 }))
+    await assertFails(updateDoc(doc(adminDb, 'products/treasury-maximum'), { treasuryCardsPerUnit:51 }))
   })
   it('keeps Journal drafts private and every article mutation server-owned', async () => {
     const article = { slug:'a-published-story',title:'A published story',excerpt:'A considered introduction to this Journal story.',bodyMarkdown:'## A heading\n\nA complete story for readers.',category:'Progress update',coverImageUrl:'',coverImageAlt:'',authorName:'Doxa Treasury',seoTitle:'',seoDescription:'',featured:false,status:'published',revision:1,publishedAt:Timestamp.now(),createdAt:Timestamp.now(),updatedAt:Timestamp.now() }
@@ -78,11 +102,52 @@ describe('Firestore access boundaries', () => {
     await assertFails(getDoc(doc(adminDb, 'websiteContentVersions/v0000000001')))
     await assertFails(setDoc(doc(adminDb, 'websiteContent/published'), { revision:4 }))
   })
-  it('prevents products from referencing the page-image library', async () => {
+  it('exposes only the published Terms document and keeps editing callable-only', async () => {
+    const policy = { slug:'terms',status:'published',revision:2,title:'Terms and Conditions',description:'The terms that apply to Doxa customers.',bodyMarkdown:'## Using Doxa\n\nPlease read these approved terms.',version:'1.0',effectiveDate:'2026-10-27',updatedAt:Timestamp.now(),updatedBy:'admin',publishedAt:Timestamp.now(),publishedBy:'admin' }
+    await env.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'legalPolicies/terms'), policy)
+      await setDoc(doc(context.firestore(), 'legalPolicyDrafts/terms'), { ...policy, status:'draft', bodyMarkdown:'Private draft' })
+      await setDoc(doc(context.firestore(), 'legalPolicyVersions/terms-v0000000002'), policy)
+    })
+    const publicDb = env.unauthenticatedContext().firestore()
+    const adminDb = env.authenticatedContext('admin', { admin:true }).firestore()
+    await assertSucceeds(getDoc(doc(publicDb, 'legalPolicies/terms')))
+    await assertFails(getDocs(collection(publicDb, 'legalPolicies')))
+    await assertFails(getDoc(doc(publicDb, 'legalPolicyDrafts/terms')))
+    await assertFails(getDoc(doc(adminDb, 'legalPolicyDrafts/terms')))
+    await assertFails(getDoc(doc(adminDb, 'legalPolicyVersions/terms-v0000000002')))
+    await assertFails(updateDoc(doc(adminDb, 'legalPolicies/terms'), { bodyMarkdown:'Forged' }))
+  })
+  it('exposes only the fixed published social-links document', async () => {
+    const links = [
+      { id:'instagram',label:'Instagram',url:'https://instagram.com/doxatreasury',visible:true },
+      { id:'tiktok',label:'TikTok',url:'',visible:false },
+      { id:'youtube',label:'YouTube',url:'',visible:false },
+      { id:'facebook',label:'Facebook',url:'',visible:false },
+      { id:'x',label:'X',url:'',visible:false },
+    ]
+    await env.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'socialMediaLinks/published'), { status:'published',revision:2,heading:'Follow',links,publishedAt:Timestamp.now() })
+      await setDoc(doc(context.firestore(), 'socialMediaLinks/preview'), { status:'draft',revision:3,heading:'Follow',links })
+      await setDoc(doc(context.firestore(), 'socialMediaLinkDrafts/current'), { status:'draft',revision:3,heading:'Follow',links })
+      await setDoc(doc(context.firestore(), 'socialMediaLinkVersions/v0000000002'), { status:'published',revision:2,heading:'Follow',links })
+    })
+    const publicDb = env.unauthenticatedContext().firestore()
+    const adminDb = env.authenticatedContext('admin', { admin:true }).firestore()
+    await assertSucceeds(getDoc(doc(publicDb, 'socialMediaLinks/published')))
+    await assertFails(getDoc(doc(publicDb, 'socialMediaLinks/preview')))
+    await assertFails(getDocs(collection(publicDb, 'socialMediaLinks')))
+    await assertFails(getDoc(doc(adminDb, 'socialMediaLinkDrafts/current')))
+    await assertFails(getDoc(doc(adminDb, 'socialMediaLinkVersions/v0000000002')))
+    await assertFails(updateDoc(doc(adminDb, 'socialMediaLinks/published'), { heading:'Forged' }))
+  })
+  it('allows products to select central Media Library images but rejects unrelated page images', async () => {
     const adminDb = env.authenticatedContext('admin', { admin:true }).firestore()
     const pageImage = 'https://firebasestorage.googleapis.com/v0/b/demo-doxa-treasury.appspot.com/o/page-images%2Flibrary%2Fhero.jpg?alt=media&token=abc'
+    const unrelatedPageImage = 'https://firebasestorage.googleapis.com/v0/b/demo-doxa-treasury.appspot.com/o/page-images%2Fhome%2Fhero.jpg?alt=media&token=abc'
     const productImage = 'https://firebasestorage.googleapis.com/v0/b/demo-doxa-treasury.appspot.com/o/product-images%2Fsample%2Ffront.jpg?alt=media&token=abc'
-    await assertFails(setDoc(doc(adminDb, 'products/page-image'), { ...product, imageUrl:pageImage }))
+    await assertSucceeds(setDoc(doc(adminDb, 'products/page-image'), { ...product, imageUrl:pageImage }))
+    await assertFails(setDoc(doc(adminDb, 'products/unrelated-page-image'), { ...product, imageUrl:unrelatedPageImage }))
     await assertSucceeds(setDoc(doc(adminDb, 'products/product-image'), { ...product, imageUrl:productImage }))
   })
   it('grants nothing for a verified mailbox and everything for a server-issued claim', async () => {
@@ -249,6 +314,9 @@ describe('Firestore access boundaries', () => {
       await setDoc(doc(context.firestore(), '_treasuryCodes/' + 'a'.repeat(64)), { status:'active',cardId:'card-1' })
       await setDoc(doc(context.firestore(), '_treasuryCodeBatches/batch-1'), { quantity:1 })
       await setDoc(doc(context.firestore(), '_treasuryRedemptions/' + 'a'.repeat(64)), { cardId:'card-1' })
+      await setDoc(doc(context.firestore(), '_treasuryCardInstances/instance-1'), { cardId:'card-1',ownerId:'customer-a',status:'owned' })
+      await setDoc(doc(context.firestore(), '_treasuryTransactions/transaction-1'), { accountId:'customer-a',type:'redemption',createdAt:Timestamp.now() })
+      await setDoc(doc(context.firestore(), '_treasuryOrderAttempts/attempt-1'), { accountId:'customer-a',orderId:'order-1',requestId:'request-1' })
       await setDoc(doc(context.firestore(), 'userTreasuries/customer-a/cards/card-1'), { cardId:'card-1',editionId:'edition-1',quantity:1 })
     })
     const ownerDb = env.authenticatedContext('customer-a').firestore()
@@ -257,10 +325,34 @@ describe('Firestore access boundaries', () => {
     await assertSucceeds(getDoc(doc(ownerDb, 'userTreasuries/customer-a/cards/card-1')))
     await assertFails(getDoc(doc(strangerDb, 'userTreasuries/customer-a/cards/card-1')))
     await assertFails(setDoc(doc(ownerDb, 'userTreasuries/customer-a/cards/card-2'), { cardId:'card-2',quantity:99 }))
-    for (const privatePath of ['treasuryEditions/edition-1','treasuryCards/card-1','_treasuryCodes/' + 'a'.repeat(64),'_treasuryCodeBatches/batch-1','_treasuryRedemptions/' + 'a'.repeat(64)]) {
+    for (const privatePath of ['treasuryEditions/edition-1','treasuryCards/card-1','_treasuryCodes/' + 'a'.repeat(64),'_treasuryCodeBatches/batch-1','_treasuryRedemptions/' + 'a'.repeat(64),'_treasuryCardInstances/instance-1','_treasuryTransactions/transaction-1','_treasuryOrderAttempts/attempt-1']) {
       await assertFails(getDoc(doc(ownerDb, privatePath)))
       await assertFails(getDoc(doc(adminDb, privatePath)))
       await assertFails(setDoc(doc(adminDb, privatePath), { forged:true }))
+    }
+  })
+  it('keeps physical-card ownership and redemption audit collections callable-only', async () => {
+    const privateCollections = ['_treasuryCardInstances','_treasuryTransactions','_treasuryOrderAttempts'] as const
+    await env.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), '_treasuryCardInstances/instance-private'), { cardId:'card-1',ownerId:'customer-a',status:'owned' })
+      await setDoc(doc(context.firestore(), '_treasuryTransactions/transaction-private'), { accountId:'customer-a',type:'redemption',createdAt:Timestamp.now() })
+      await setDoc(doc(context.firestore(), '_treasuryOrderAttempts/attempt-private'), { accountId:'customer-a',orderId:'order-1',requestId:'request-1' })
+    })
+
+    const clients = [
+      env.unauthenticatedContext().firestore(),
+      env.authenticatedContext('customer-a').firestore(),
+      env.authenticatedContext('admin', { admin:true }).firestore(),
+    ]
+    for (const db of clients) {
+      for (const collectionName of privateCollections) {
+        const existing = doc(db, collectionName, collectionName === '_treasuryCardInstances' ? 'instance-private' : collectionName === '_treasuryTransactions' ? 'transaction-private' : 'attempt-private')
+        await assertFails(getDoc(existing))
+        await assertFails(getDocs(collection(db, collectionName)))
+        await assertFails(setDoc(doc(db, collectionName, 'forged'), { forged:true }))
+        await assertFails(updateDoc(existing, { forged:true }))
+        await assertFails(deleteDoc(existing))
+      }
     }
   })
 })

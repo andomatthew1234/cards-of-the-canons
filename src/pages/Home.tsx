@@ -1,23 +1,23 @@
-import { ArrowDown, ArrowLeft, ArrowRight, BookOpen, Landmark, ScrollText, ShieldCheck, Sparkles, UsersRound, type LucideIcon } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type TransitionEvent as ReactTransitionEvent } from 'react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BookOpen, Landmark, ScrollText, ShieldCheck, Sparkles, UsersRound, type LucideIcon } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { CatalogueEmpty, CatalogueLoading, CatalogueUnavailable } from '../components/CatalogueState'
-import { Newsletter } from '../components/Newsletter'
 import { PageMeta } from '../components/PageMeta'
+import { socialIconById } from '../components/SocialPlatformIcon'
 import { ProductCard } from '../components/ProductCard'
-import { carouselTrackWindow, wrapIndex } from '../lib/carousel'
+import { wrapIndex } from '../lib/carousel'
 import { Reveal } from '../components/Reveal'
 import { SafeRichText } from '../components/SafeRichText'
 import { useCatalogState } from '../context/CatalogContext'
-import { defaultPageContent, useSiteContent } from '../context/SiteContentContext'
+import { useSiteContent } from '../context/SiteContentContext'
+import { defaultHomepageEditorialPanels } from '../cms/websiteContent'
 import { organizationJsonLd, websiteJsonLd } from '../lib/seo'
 import { orderHomeProducts } from '../lib/homeProducts'
 import type { Product } from '../types'
 
-type StoryPoint = { icon: LucideIcon; title: string; body: string }
+type StoryPoint = { id?: string; icon: LucideIcon; title: string; body: string; imageUrl?: string; imageAlt?: string }
 type NavigatorWithConnection = Navigator & { connection?: { saveData?: boolean } }
 type CarouselDirection = -1 | 1
-type CarouselMotion = { direction: CarouselDirection; active: boolean }
 
 function canPlayHeroVideo() {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
@@ -131,6 +131,10 @@ function churchCase(value: string) {
   return value.replace(/\bchurch\b/g, 'Church')
 }
 
+export function HomeIntroductionBody({ value }: { value: string }) {
+  return <SafeRichText value={value} className="home-introduction-body" />
+}
+
 export function missionTitleLines(value: string) {
   const normalised = value.trim()
   if (/^the Church's light,\s*is meant to be shared$/i.test(normalised)) {
@@ -139,10 +143,50 @@ export function missionTitleLines(value: string) {
   return normalised.split(/\n|\|/).map((line) => line.trim()).filter(Boolean)
 }
 
-export function ParallaxFigure({ src }: { src: string }) {
+export function ParallaxFigure({
+  src,
+  alt = '',
+  backSrc = '',
+  backAlt = '',
+}: {
+  src: string
+  alt?: string
+  backSrc?: string
+  backAlt?: string
+}) {
   const frameRef = useRef<HTMLElement>(null)
+  const backImageRef = useRef<HTMLImageElement>(null)
+  const backLoadVersion = useRef(0)
   const pointerFrame = useRef(0)
   const [flipped, setFlipped] = useState(false)
+  const [backReady, setBackReady] = useState(!backSrc)
+  const [flipQueued, setFlipQueued] = useState(false)
+
+  const prepareBackImage = useCallback(async (image: HTMLImageElement, version: number) => {
+    try {
+      if (typeof image.decode === 'function') await image.decode()
+    } catch {
+      // Some browsers reject decode() for an otherwise usable cached image.
+      if (!image.complete || image.naturalWidth === 0) return
+    }
+    if (version === backLoadVersion.current) setBackReady(true)
+  }, [])
+
+  useEffect(() => {
+    const version = backLoadVersion.current + 1
+    backLoadVersion.current = version
+    setFlipped(false)
+    setFlipQueued(false)
+    setBackReady(!backSrc)
+    const image = backImageRef.current
+    if (backSrc && image?.complete && image.naturalWidth > 0) void prepareBackImage(image, version)
+  }, [backSrc, prepareBackImage])
+
+  useEffect(() => {
+    if (!backReady || !flipQueued) return
+    setFlipped(true)
+    setFlipQueued(false)
+  }, [backReady, flipQueued])
 
   useEffect(() => {
     const frame = frameRef.current
@@ -190,20 +234,37 @@ export function ParallaxFigure({ src }: { src: string }) {
     frame.style.setProperty('--history-tilt-y', '0deg')
   }
 
+  const toggleFlip = () => {
+    if (backSrc && !backReady && !flipped) {
+      setFlipQueued(true)
+      return
+    }
+    setFlipQueued(false)
+    setFlipped((current) => !current)
+  }
+
   return <figure ref={frameRef} onPointerMove={move} onPointerLeave={reset} aria-label="Interactive Doxa card artwork">
     <div className="home-history-image">
-      <button className={`home-history-flip${flipped ? ' is-flipped' : ''}`} type="button" aria-pressed={flipped} aria-label={flipped ? 'Show the front of the Doxa card' : 'Show the back of the Doxa card'} onClick={() => setFlipped((current) => !current)}>
+      <button className={`home-history-flip${flipped ? ' is-flipped' : ''}${flipQueued ? ' is-preparing' : ''}`} type="button" aria-pressed={flipped} aria-busy={backSrc ? !backReady : false} aria-label={flipped ? 'Show the front of the Doxa card' : 'Show the back of the Doxa card'} onClick={toggleFlip}>
         <span className="home-history-flip-inner">
-          <span className="home-history-face home-history-front"><img src={src} alt="" loading="lazy" decoding="async" /></span>
-          <span className="home-history-face home-history-back" aria-hidden="true"><span className="home-card-back-mark">D</span><strong>Doxa</strong><small>Treasury</small><span className="home-card-back-rule" /></span>
+          <span className="home-history-face home-history-front" aria-hidden={flipped || undefined}><img src={src} alt={alt} loading="lazy" decoding="async" /></span>
+          <span className={`home-history-face home-history-back${backSrc ? ' has-custom-image' : ''}`} aria-hidden={!flipped || undefined}>
+            {backSrc
+              ? <img ref={backImageRef} className="home-history-back-image" src={backSrc} alt={backAlt} loading="eager" fetchPriority="high" decoding="async" onLoad={(event) => void prepareBackImage(event.currentTarget, backLoadVersion.current)} />
+              : <><span className="home-card-back-mark">D</span><strong>Doxa</strong><small>Treasury</small><span className="home-card-back-rule" /></>}
+          </span>
         </span>
       </button>
     </div>
+    <span className="home-history-click-prompt" aria-hidden="true">
+      <ArrowUp />
+      <span>Click me</span>
+    </span>
     <figcaption className="sr-only">Select the card to turn it over.</figcaption>
   </figure>
 }
 
-function CandlePanel({ side }: { side: 'left' | 'right' }) {
+function MissionBackground() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const play = useCallback(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
@@ -223,11 +284,10 @@ function CandlePanel({ side }: { side: 'left' | 'right' }) {
       document.removeEventListener('visibilitychange', play)
     }
   }, [play])
-  return <div className={`home-candle-panel home-candle-${side}`} aria-hidden="true">
-    <video ref={videoRef} autoPlay muted loop playsInline preload="metadata" poster="/images/editorial/doxa-candle-vigil.webp" tabIndex={-1} onLoadedData={play} onCanPlay={play}>
-      <source src="/videos/doxa-candle-vigil.mp4" type="video/mp4" />
-    </video>
-  </div>
+  return <video className="home-mission-background" ref={videoRef} autoPlay muted loop playsInline preload="metadata" poster="/images/mission-candles-poster.webp" tabIndex={-1} aria-hidden="true" onLoadedData={play} onCanPlay={play}>
+    <source media="(max-width: 700px)" src="/videos/doxa-mission-candles-mobile.mp4" type="video/mp4" />
+    <source src="/videos/doxa-mission-candles.mp4" type="video/mp4" />
+  </video>
 }
 
 function prefersReducedCarouselMotion() {
@@ -235,54 +295,57 @@ function prefersReducedCarouselMotion() {
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 }
 
-function useSlidingCarousel(itemCount: number, visibleCount: number, rotateWhenAllVisible = false) {
-  const [start, setStart] = useState(0)
-  const [motion, setMotion] = useState<CarouselMotion | null>(null)
-  const motionRef = useRef<CarouselMotion | null>(null)
+function useFreeScrollCarousel(itemCount: number) {
+  const viewportRef = useRef<HTMLDivElement>(null)
+  const slideRefs = useRef<Array<HTMLElement | null>>([])
+  const dragRef = useRef({ pointerId: -1, startX: 0, startScrollLeft: 0, moved: false })
+  const suppressClickRef = useRef(false)
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [dragging, setDragging] = useState(false)
 
-  const finish = useCallback(() => {
-    const current = motionRef.current
-    if (!current) return
-    motionRef.current = null
-    setStart((value) => value + current.direction)
-    setMotion(null)
+  const registerSlide = useCallback((index: number, node: HTMLElement | null) => {
+    slideRefs.current[index] = node
+  }, [])
+
+  const nearestIndex = useCallback(() => {
+    const viewport = viewportRef.current
+    if (!viewport || itemCount <= 0) return 0
+    let nearest = 0
+    let nearestDistance = Number.POSITIVE_INFINITY
+    slideRefs.current.slice(0, itemCount).forEach((slide, index) => {
+      if (!slide) return
+      const distance = Math.abs(slide.offsetLeft - viewport.scrollLeft)
+      if (distance < nearestDistance) {
+        nearest = index
+        nearestDistance = distance
+      }
+    })
+    return nearest
   }, [itemCount])
 
-  useEffect(() => {
-    motionRef.current = null
-    setMotion(null)
-    setStart((current) => wrapIndex(current, itemCount))
-  }, [itemCount, visibleCount])
+  const onScroll = useCallback(() => {
+    setActiveIndex(nearestIndex())
+  }, [nearestIndex])
 
-  useEffect(() => {
-    if (!motion || motion.active) return
-    const frame = window.requestAnimationFrame(() => {
-      setMotion((current) => {
-        if (!current) return null
-        const activeMotion = { ...current, active: true }
-        motionRef.current = activeMotion
-        return activeMotion
-      })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [motion])
-
-  useEffect(() => {
-    if (!motion?.active) return
-    const fallback = window.setTimeout(finish, 720)
-    return () => window.clearTimeout(fallback)
-  }, [finish, motion?.active])
+  const scrollToIndex = useCallback((index: number) => {
+    if (itemCount <= 0) return
+    const next = wrapIndex(index, itemCount)
+    const viewport = viewportRef.current
+    const slide = slideRefs.current[next]
+    if (!viewport || !slide) return
+    const options: ScrollToOptions = {
+      left: slide.offsetLeft,
+      behavior: prefersReducedCarouselMotion() ? 'auto' : 'smooth',
+    }
+    if (typeof viewport.scrollTo === 'function') viewport.scrollTo(options)
+    else viewport.scrollLeft = options.left ?? 0
+    setActiveIndex(next)
+  }, [itemCount])
 
   const move = useCallback((direction: CarouselDirection) => {
-    if (itemCount <= 1 || (!rotateWhenAllVisible && itemCount <= visibleCount) || motionRef.current) return
-    if (prefersReducedCarouselMotion()) {
-      setStart((current) => current + direction)
-      return
-    }
-    const nextMotion = { direction, active: false }
-    motionRef.current = nextMotion
-    setMotion(nextMotion)
-  }, [itemCount, rotateWhenAllVisible, visibleCount])
+    if (itemCount <= 1) return
+    scrollToIndex(activeIndex + direction)
+  }, [activeIndex, itemCount, scrollToIndex])
 
   const onKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
@@ -290,16 +353,75 @@ function useSlidingCarousel(itemCount: number, visibleCount: number, rotateWhenA
     move(event.key === 'ArrowLeft' ? -1 : 1)
   }, [move])
 
-  const onTransitionEnd = useCallback((event: ReactTransitionEvent<HTMLElement>) => {
-    if (event.target === event.currentTarget && event.propertyName === 'transform') finish()
-  }, [finish])
+  const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || itemCount <= 1) return
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: event.currentTarget.scrollLeft,
+      moved: false,
+    }
+    suppressClickRef.current = false
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }, [itemCount])
 
-  return { start, motion, move, onKeyDown, onTransitionEnd }
-}
+  const onPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (drag.pointerId !== event.pointerId) return
+    const distance = event.clientX - drag.startX
+    if (!drag.moved && Math.abs(distance) < 7) return
+    drag.moved = true
+    suppressClickRef.current = true
+    setDragging(true)
+    event.preventDefault()
+    event.currentTarget.scrollLeft = drag.startScrollLeft - distance
+    setActiveIndex(nearestIndex())
+  }, [nearestIndex])
 
-function carouselTrackClass(base: string, motion: CarouselMotion | null) {
-  if (!motion) return base
-  return `${base} is-${motion.direction > 0 ? 'next' : 'previous'}${motion.active ? ' is-active' : ''}`
+  const finishDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current.pointerId !== event.pointerId) return
+    event.currentTarget.releasePointerCapture?.(event.pointerId)
+    dragRef.current.pointerId = -1
+    setDragging(false)
+    setActiveIndex(nearestIndex())
+  }, [nearestIndex])
+
+  const onClickCapture = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!suppressClickRef.current) return
+    event.preventDefault()
+    event.stopPropagation()
+    suppressClickRef.current = false
+  }, [])
+
+  useEffect(() => {
+    slideRefs.current.length = itemCount
+    setActiveIndex((current) => itemCount > 0 ? wrapIndex(current, itemCount) : 0)
+  }, [itemCount])
+
+  useEffect(() => {
+    const alignCurrentSlide = () => {
+      const viewport = viewportRef.current
+      const slide = slideRefs.current[activeIndex]
+      if (viewport && slide) viewport.scrollLeft = slide.offsetLeft
+    }
+    window.addEventListener('resize', alignCurrentSlide, { passive: true })
+    return () => window.removeEventListener('resize', alignCurrentSlide)
+  }, [activeIndex])
+
+  return {
+    activeIndex,
+    dragging,
+    viewportRef,
+    registerSlide,
+    move,
+    onKeyDown,
+    onScroll,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp: finishDrag,
+    onPointerCancel: finishDrag,
+    onClickCapture,
+  }
 }
 
 export function InformationGrid({ items }: { items: StoryPoint[] }) {
@@ -310,37 +432,47 @@ export function InformationGrid({ items }: { items: StoryPoint[] }) {
     window.addEventListener('resize', update, { passive: true })
     return () => window.removeEventListener('resize', update)
   }, [])
-  const carousel = useSlidingCarousel(items.length, visibleCount, true)
-  const trackItems = carouselTrackWindow(items, carousel.start, visibleCount, carousel.motion?.direction ?? null)
-  const at = (offset: number) => items[wrapIndex(carousel.start + offset, items.length)]
-  const extraIndex = carousel.motion?.direction === -1 ? 0 : trackItems.length - 1
-  const trackStart = carousel.start + (carousel.motion?.direction === -1 ? -1 : 0)
+  const carousel = useFreeScrollCarousel(items.length)
+  const at = (offset: number) => items[wrapIndex(carousel.activeIndex + offset, items.length)]
 
   return <section className="home-information home-stage home-texture home-texture-terra" aria-label="Why Doxa">
     <div className="home-information-carousel" role="region" aria-roledescription="carousel" aria-label="Why Doxa information" tabIndex={0} onKeyDown={carousel.onKeyDown}>
-      <article className="home-information-card home-information-ghost is-left" aria-hidden="true"><h3>{churchCase(at(-1).title)}</h3><p>{churchCase(at(-1).body)}</p></article>
-      <div className="home-information-grid">
+      <article className="home-information-card home-information-ghost is-left" aria-hidden="true"><h3>{churchCase(at(-1).title)}</h3>{at(-1).body && <p>{churchCase(at(-1).body)}</p>}</article>
+      <div
+        className={`home-information-grid${carousel.dragging ? ' is-dragging' : ''}`}
+        ref={carousel.viewportRef}
+        onScroll={carousel.onScroll}
+        onPointerDown={carousel.onPointerDown}
+        onPointerMove={carousel.onPointerMove}
+        onPointerUp={carousel.onPointerUp}
+        onPointerCancel={carousel.onPointerCancel}
+        onClickCapture={carousel.onClickCapture}
+      >
         <div
-          className={carouselTrackClass('home-information-track', carousel.motion)}
+          className="home-information-track"
           data-visible-count={visibleCount}
-          onTransitionEnd={carousel.onTransitionEnd}
         >
-          {trackItems.map((item, index) => {
+          {items.map((item, index) => {
             const Icon = item.icon
-            const itemNumber = items.indexOf(item) + 1
-            return <article className="home-information-card" key={`${items.indexOf(item)}-${trackStart + index}`} aria-hidden={carousel.motion ? index === extraIndex : undefined}>
+            const itemNumber = index + 1
+            return <article
+              className={`home-information-card${item.imageUrl ? ' has-background' : ''}`}
+              key={item.id ?? index}
+              ref={(node) => carousel.registerSlide(index, node)}
+              style={item.imageUrl ? { backgroundImage: `linear-gradient(145deg, rgba(252, 245, 222, .94), rgba(232, 216, 183, .88)), url(${item.imageUrl})` } : undefined}
+            >
               <span className="home-information-number" aria-hidden="true">0{itemNumber}</span>
               <span className="home-information-icon"><Icon aria-hidden="true" /></span>
               <h3>{churchCase(item.title)}</h3>
-              <p>{churchCase(item.body)}</p>
+              {item.body && <p>{churchCase(item.body)}</p>}
             </article>
           })}
         </div>
       </div>
-      <article className="home-information-card home-information-ghost is-right" aria-hidden="true"><h3>{churchCase(at(visibleCount).title)}</h3><p>{churchCase(at(visibleCount).body)}</p></article>
-      <button className="home-information-arrow previous" type="button" aria-label="Previous information" disabled={Boolean(carousel.motion)} onClick={() => carousel.move(-1)}><ArrowLeft aria-hidden="true" /></button>
-      <button className="home-information-arrow next" type="button" aria-label="Next information" disabled={Boolean(carousel.motion)} onClick={() => carousel.move(1)}><ArrowRight aria-hidden="true" /></button>
-      <span className="sr-only" role="status" aria-live="polite">Information {wrapIndex(carousel.start, items.length) + 1} of {items.length}</span>
+      <article className="home-information-card home-information-ghost is-right" aria-hidden="true"><h3>{churchCase(at(visibleCount).title)}</h3>{at(visibleCount).body && <p>{churchCase(at(visibleCount).body)}</p>}</article>
+      <button className="home-information-arrow previous" type="button" aria-label="Previous information" onClick={() => carousel.move(-1)}><ArrowLeft aria-hidden="true" /></button>
+      <button className="home-information-arrow next" type="button" aria-label="Next information" onClick={() => carousel.move(1)}><ArrowRight aria-hidden="true" /></button>
+      <span className="sr-only" role="status" aria-live="polite">Information {carousel.activeIndex + 1} of {items.length}</span>
     </div>
   </section>
 }
@@ -353,48 +485,70 @@ export function HomeProductCarousel({ products }: { products: Product[] }) {
     window.addEventListener('resize', update, { passive: true })
     return () => window.removeEventListener('resize', update)
   }, [])
-  const carousel = useSlidingCarousel(products.length, visibleCount)
-  const trackProducts = carouselTrackWindow(products, carousel.start, visibleCount, carousel.motion?.direction ?? null)
+  useEffect(() => {
+    // Warm every catalogue image once so an incoming card cannot reveal a
+    // blank frame while the browser begins fetching or decoding its artwork.
+    if (typeof Image === 'undefined') return
+    products.forEach((product) => {
+      const image = new Image()
+      image.decoding = 'async'
+      image.src = product.imageUrl
+      void image.decode?.().catch(() => undefined)
+    })
+  }, [products])
+  const carousel = useFreeScrollCarousel(products.length)
   const canRotate = products.length > Math.min(visibleCount, products.length)
-  const extraIndex = carousel.motion?.direction === -1 ? 0 : trackProducts.length - 1
-  const trackStart = carousel.start + (carousel.motion?.direction === -1 ? -1 : 0)
 
   return <div className="home-product-carousel" role="region" aria-roledescription="carousel" aria-label="Explore the collection" tabIndex={0} onKeyDown={carousel.onKeyDown}>
-    <div className="home-product-showcase">
+    <div
+      className={`home-product-showcase${carousel.dragging ? ' is-dragging' : ''}`}
+      ref={carousel.viewportRef}
+      onScroll={carousel.onScroll}
+      onPointerDown={carousel.onPointerDown}
+      onPointerMove={carousel.onPointerMove}
+      onPointerUp={carousel.onPointerUp}
+      onPointerCancel={carousel.onPointerCancel}
+      onClickCapture={carousel.onClickCapture}
+    >
       <div
-        className={carouselTrackClass('home-product-track', carousel.motion)}
+        className="home-product-track"
         data-visible-count={visibleCount}
-        onTransitionEnd={carousel.onTransitionEnd}
       >
-        {trackProducts.map((product, index) => {
-          const isTransitionOnlySlide = Boolean(carousel.motion) && index === extraIndex
-          return <div className="home-product-slide" key={`${product.id}-${trackStart + index}`} aria-hidden={isTransitionOnlySlide || undefined} inert={isTransitionOnlySlide || undefined}><ProductCard product={product} variant="compact" /></div>
-        })}
+        {products.map((product, index) => <div className="home-product-slide" key={product.id} ref={(node) => carousel.registerSlide(index, node)}><ProductCard product={product} variant="compact" /></div>)}
       </div>
     </div>
     {canRotate && <>
-      <button className="home-product-arrow previous" type="button" aria-label="Previous product" disabled={Boolean(carousel.motion)} onClick={() => carousel.move(-1)}><ArrowLeft aria-hidden="true" /></button>
-      <button className="home-product-arrow next" type="button" aria-label="Next product" disabled={Boolean(carousel.motion)} onClick={() => carousel.move(1)}><ArrowRight aria-hidden="true" /></button>
-      <span className="home-product-page" aria-hidden="true">{wrapIndex(carousel.start, products.length) + 1} / {products.length}</span>
-      <span className="sr-only" role="status" aria-live="polite">Product {wrapIndex(carousel.start, products.length) + 1} of {products.length}</span>
+      <button className="home-product-arrow previous" type="button" aria-label="Previous product" onClick={() => carousel.move(-1)}><ArrowLeft aria-hidden="true" /></button>
+      <button className="home-product-arrow next" type="button" aria-label="Next product" onClick={() => carousel.move(1)}><ArrowRight aria-hidden="true" /></button>
+      <span className="home-product-page" aria-hidden="true">{carousel.activeIndex + 1} / {products.length}</span>
+      <span className="sr-only" role="status" aria-live="polite">Product {carousel.activeIndex + 1} of {products.length}</span>
     </>}
   </div>
 }
 
 export function Home({ previewMode = false }: { previewMode?: boolean }) {
   const { products, status, reload } = useCatalogState()
-  const { pages, website } = useSiteContent()
+  const { pages, website, socialMedia } = useSiteContent()
   const [heroVideoReady, setHeroVideoReady] = useState(false)
   const home = pages.home
-  const sections = home.sections ?? defaultPageContent.home.sections!
+  const sections = website.pages.home.sections
+  const editorial = sections.editorial ?? defaultHomepageEditorialPanels
+  const visibleSocialLinks = (socialMedia?.links ?? []).filter((link) => link.visible && link.url)
   // Production catalogue data is authoritative. Demo products stay confined
   // to CatalogContext's explicit local demo mode and are never merged here.
   const featuredProducts = orderHomeProducts(products)
-  const information: StoryPoint[] = [
-    { icon: BookOpen, title: sections.values.firstTitle, body: sections.values.firstBody },
-    { icon: Sparkles, title: sections.values.secondTitle, body: sections.values.secondBody },
-    { icon: ShieldCheck, title: sections.values.thirdTitle, body: sections.values.thirdBody },
+  const legacyInformation: StoryPoint[] = [
+    { id: 'rich-context', icon: BookOpen, title: sections.values.firstTitle, body: sections.values.firstBody },
+    { id: 'collectible-format', icon: Sparkles, title: sections.values.secondTitle, body: sections.values.secondBody },
+    { id: 'considered-detail', icon: ShieldCheck, title: sections.values.thirdTitle, body: sections.values.thirdBody },
   ]
+  const informationIcons = [BookOpen, Sparkles, ShieldCheck, Landmark, ScrollText, UsersRound]
+  const information: StoryPoint[] = sections.values.bubbles?.length
+    ? sections.values.bubbles.map((bubble, index) => ({
+      ...bubble,
+      icon: informationIcons[index % informationIcons.length],
+    }))
+    : legacyInformation
   const introductionTitle = home.title === 'Stories of faith, carefully collected.' ? 'The Glory of the Church' : churchCase(home.title)
   const introductionBody = home.body.startsWith('Discover remarkable people')
     ? 'Discover the beauty, history and living witness of the Church through stories created to collect, revisit and share.'
@@ -429,36 +583,97 @@ export function Home({ previewMode = false }: { previewMode?: boolean }) {
         <Reveal className="home-introduction-copy">
           <p className="eyebrow">History held in your hand</p>
           <h2>{introductionTitle}</h2>
-          <p>{introductionBody}</p>
+          <HomeIntroductionBody value={introductionBody} />
           <div className="button-row"><Link className="button primary" data-editor-target={previewMode ? 'home-hero-primary' : undefined} to="/shop">{sections.hero.primaryActionLabel} <ArrowRight aria-hidden="true" /></Link><Link className="button secondary" data-editor-target={previewMode ? 'home-hero-secondary' : undefined} to="/about">About us</Link></div>
         </Reveal>
         <Reveal className="home-introduction-visual" delay={100}>
-          <ParallaxFigure src={sections.hero.imageUrl} />
+          <ParallaxFigure
+            src={sections.hero.imageUrl}
+            alt={sections.hero.imageAlt}
+            backSrc={sections.hero.backImageUrl}
+            backAlt={sections.hero.backImageAlt}
+          />
         </Reveal>
       </section>
     </>
     if (section === 'story') return <section className="home-mission home-stage" data-editor-target={previewMode ? 'home-story' : undefined}>
-      <CandlePanel side="left" />
+      <MissionBackground />
+      <div className="home-mission-shade" aria-hidden="true" />
       <div className="home-mission-centre">
         <Reveal className="home-mission-heading"><p className="eyebrow">Our mission</p><h2>{missionTitleLines(missionTitle).map((line) => <span key={line}>{line}</span>)}</h2></Reveal>
-        <Reveal className="home-mission-copy" delay={100}><SafeRichText value={missionBody} /><Link className="text-link" to="/about">Read our story <ArrowRight aria-hidden="true" /></Link></Reveal>
+        <Reveal className="home-mission-copy" delay={100}><SafeRichText value={missionBody} /><Link className="button home-mission-story-button" to="/about">About Our Story <ArrowRight aria-hidden="true" /></Link></Reveal>
         <Reveal className="home-mission-verse" delay={170}><span aria-hidden="true">“</span><blockquote><strong>14</strong> You are the light of the world. A city that is set on a hill cannot be hidden… <strong>16</strong> Let your light so shine before men, that they may see your good works and glorify your Father in heaven.</blockquote><cite>Matthew 5:14, 16</cite></Reveal>
       </div>
-      <CandlePanel side="right" />
     </section>
     if (section === 'featured') return <section id="collection" className="section home-collection home-stage home-texture home-texture-cream" data-editor-target={previewMode ? 'home-featured' : undefined}>
-      <Reveal><div className="section-heading"><div><p className="eyebrow">{sections.featured.eyebrow}</p><h2>{sections.featured.title}</h2></div><p>{churchCase(sections.featured.body)}</p></div></Reveal>
+      {(sections.featured.eyebrow || sections.featured.title || sections.featured.body) && <Reveal><div className="section-heading">
+        {(sections.featured.eyebrow || sections.featured.title) && <div>
+          {sections.featured.eyebrow && <p className="eyebrow">{sections.featured.eyebrow}</p>}
+          {sections.featured.title && <h2>{sections.featured.title}</h2>}
+        </div>}
+        {sections.featured.body && <p>{churchCase(sections.featured.body)}</p>}
+      </div></Reveal>}
       {status === 'loading' ? <CatalogueLoading /> : status === 'error' ? <CatalogueUnavailable retry={reload} /> : featuredProducts.length === 0 ? <CatalogueEmpty /> : <><HomeProductCarousel products={featuredProducts} /><Reveal><div className="centred"><Link className="text-link" to="/shop">{website.copy.homeViewAllLabel} <ArrowRight size={18} /></Link></div></Reveal></>}
     </section>
     if (section === 'values') return <div data-editor-target={previewMode ? 'home-values' : undefined}><InformationGrid items={information} /></div>
     return <>
-      <section className="home-editorial-chapter home-community-chapter" aria-labelledby="home-community-title">
-        <Reveal className="home-editorial-copy"><UsersRound aria-hidden="true" /><p className="eyebrow">Join the council</p><h2 id="home-community-title">Collect with a community.</h2><p>Create an account to follow orders, take part in community polls and build a Treasury that grows with every card you collect.</p><Link className="button primary" to="/account">Create your account <ArrowRight aria-hidden="true" /></Link></Reveal>
-        <Reveal className="home-editorial-media" delay={100}><figure><img src={sections.story.imageUrl} alt={sections.story.imageAlt} loading="lazy" decoding="async" /><figcaption>Follow the collection as it grows</figcaption></figure></Reveal>
+      <section className="home-editorial-chapter home-community-chapter" aria-labelledby="home-community-title" data-editor-target={previewMode ? 'home-council' : undefined}>
+        <Reveal className="home-editorial-media home-community-media"><figure>{editorial.council.imageUrl
+          ? <img src={editorial.council.imageUrl} alt={editorial.council.imageAlt} loading="lazy" decoding="async" />
+          : <div className="home-genesis-placeholder" role="img" aria-label="Join the Council image to be added"><span>Image</span><strong>TBD</strong></div>}
+        </figure></Reveal>
+        <Reveal className="home-editorial-copy home-community-copy">
+          <h2 id="home-community-title">{editorial.council.title}</h2>
+          {editorial.council.body && <SafeRichText value={editorial.council.body} />}
+          {(editorial.council.quoteReference || editorial.council.quote) && <blockquote className="home-community-verse">
+            {editorial.council.quoteReference && <strong>{editorial.council.quoteReference}</strong>}
+            {editorial.council.quote && <span>{editorial.council.quote}</span>}
+          </blockquote>}
+          <Link className="button home-community-account-button" to="/account?mode=register">Make an Account <ArrowRight aria-hidden="true" /></Link>
+        </Reveal>
       </section>
-      <section className="home-editorial-chapter home-scriptorium-chapter" aria-labelledby="newsletter-title">
-        <Reveal className="home-editorial-media"><figure><img src="/images/history/hosios-loukas.jpg" alt="The Byzantine monastery of Hosios Loukas beneath the mountains of Boeotia" loading="lazy" decoding="async" /><figcaption>Stories from the living history of the Church</figcaption></figure></Reveal>
-        <Reveal className="home-scriptorium-copy" delay={100}><ScrollText aria-hidden="true" /><Newsletter /></Reveal>
+      <section className="home-editorial-chapter home-genesis-chapter" aria-labelledby="home-genesis-title" data-editor-target={previewMode ? 'home-genesis' : undefined}>
+        <Reveal className="home-editorial-media home-genesis-media">
+          <figure>{editorial.genesis.imageUrl
+            ? <img src={editorial.genesis.imageUrl} alt={editorial.genesis.imageAlt} loading="lazy" decoding="async" />
+            : <div className="home-genesis-placeholder" role="img" aria-label="How It Began image to be added"><span>Image</span><strong>TBD</strong></div>}
+          </figure>
+        </Reveal>
+        <Reveal className="home-editorial-copy home-genesis-copy" delay={100}>
+          <h2 id="home-genesis-title">{editorial.genesis.title}</h2>
+          {editorial.genesis.body && <SafeRichText value={editorial.genesis.body} />}
+          <Link className="button home-genesis-story-button" to="/about">Our Story <ArrowRight aria-hidden="true" /></Link>
+          {(editorial.genesis.quoteReference || editorial.genesis.quote) && <blockquote className="home-genesis-verse">
+            {editorial.genesis.quoteReference && <strong>{editorial.genesis.quoteReference}</strong>}
+            {editorial.genesis.quote && <SafeRichText value={editorial.genesis.quote} className="home-genesis-verse-lines" />}
+          </blockquote>}
+        </Reveal>
+      </section>
+      <section className="home-editorial-chapter home-from-scriptorium-chapter" aria-labelledby="home-from-scriptorium-title" data-editor-target={previewMode ? 'home-from-scriptorium' : undefined}>
+        <Reveal className="home-editorial-media home-from-scriptorium-media">
+          <figure>{editorial.scriptorium.imageUrl
+            ? <img src={editorial.scriptorium.imageUrl} alt={editorial.scriptorium.imageAlt} loading="lazy" decoding="async" />
+            : <div className="home-genesis-placeholder" role="img" aria-label="From the Scriptorium image to be added"><span>Image</span><strong>TBD</strong></div>}
+          </figure>
+        </Reveal>
+        <Reveal className="home-editorial-copy home-from-scriptorium-copy" delay={100}>
+          <h2 id="home-from-scriptorium-title">{editorial.scriptorium.title}</h2>
+          {editorial.scriptorium.body && <SafeRichText value={editorial.scriptorium.body} />}
+          <Link className="button home-scriptorium-journal-button" to="/journal">The Journal <ArrowRight aria-hidden="true" /></Link>
+        </Reveal>
+      </section>
+      <section className="home-editorial-chapter home-scriptorium-chapter home-socials-chapter" aria-labelledby="home-socials-title">
+        <Reveal className="home-editorial-media home-socials-media"><figure><img src="/images/history/hosios-loukas.jpg" alt="The Byzantine monastery of Hosios Loukas beneath the mountains of Boeotia" loading="lazy" decoding="async" /><figcaption>Follow the Doxa journey</figcaption></figure></Reveal>
+        <Reveal className="home-scriptorium-copy home-socials-copy" delay={100}>
+          <h2 id="home-socials-title">{sections.newsletter.title}</h2>
+          <p>{sections.newsletter.body}</p>
+          {visibleSocialLinks.length > 0
+            ? <div className="home-social-links" aria-label="Doxa social media profiles">{visibleSocialLinks.map((link) => {
+              const Icon = socialIconById[link.id]
+              return <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer" aria-label={link.label} title={link.label}><Icon aria-hidden="true" /><span>{link.label}</span></a>
+            })}</div>
+            : <p className="home-socials-empty">Social profiles will appear here when published.</p>}
+        </Reveal>
       </section>
       <section className="home-origins" aria-labelledby="home-origins-title">
         <Reveal><Landmark aria-hidden="true" /><p className="eyebrow">Humble beginnings</p><h2 id="home-origins-title">Made to share what is worth remembering.</h2><p>Doxa began with a simple conviction: the beauty and history of the Church should be easier to encounter, hold and pass on.</p><Link className="button secondary" to="/about">Our story <ArrowRight aria-hidden="true" /></Link></Reveal>

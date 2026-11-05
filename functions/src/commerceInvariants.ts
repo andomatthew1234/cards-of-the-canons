@@ -28,6 +28,8 @@ export interface StoredOrderItem {
   quantity: number
   lineTotalCents: number
   inventoryTracked: boolean
+  treasuryCardsPerUnit: number
+  treasuryEligibleCodeCount: number
   /** Firestore create time of the product document — identity, not version. */
   productCreateTimeMillis?: number | null
 }

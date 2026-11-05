@@ -13,8 +13,12 @@ export interface Product {
   imageUrl: string
   imageAlt: string
   category: string
+  /** Lower values appear first in storefront product rails. */
+  sortOrder?: number
   featured: boolean
   stock: number | null
+  /** Physical Treasury cards included per purchased unit. Accessories use 0. */
+  treasuryCardsPerUnit: number
   status: ProductStatus
 }
 
@@ -90,6 +94,9 @@ export interface HomePageSections {
     accent: string
     imageUrl: string
     imageAlt: string
+    /** Optional so homepage content saved before the flip-card editor remains valid. */
+    backImageUrl?: string
+    backImageAlt?: string
     imageCredit: string
     primaryActionLabel: string
     secondaryActionLabel: string
@@ -157,7 +164,7 @@ export interface NewsletterSubscriber {
   email: string
   consent: true
   source: NewsletterSource | string
-  /** 'pending' until the double opt-in confirmation completes. */
+  /** 'pending' is retained only for legacy records created before immediate subscription. */
   status: NewsletterStatus
   createdAt?: unknown
   confirmedAt?: unknown
@@ -290,6 +297,8 @@ export interface OrderItemSnapshot {
   quantity: number
   lineTotalCents: number
   inventoryTracked?: boolean
+  treasuryCardsPerUnit?: number
+  treasuryEligibleCodeCount?: number
 }
 
 export interface Order {
@@ -301,6 +310,12 @@ export interface Order {
   shippingCents: number
   totalCents: number
   items: OrderItemSnapshot[]
+  treasuryEligibleCodeCount?: number
+  treasuryAssignedCodeCount?: number
+  treasuryRedeemedCodeCount?: number
+  treasuryFailedAttempts?: number
+  treasuryAttemptLimit?: number
+  treasuryLocked?: boolean
   customerEmail?: string
   paymentStatus?: 'paid' | 'unpaid' | 'no_payment_required'
   /** Normalised, monotonic payment state: unpaid | failed | paid | disputed | refunded. */
@@ -509,6 +524,17 @@ export interface TreasuryEdition {
   coverImageAlt: string
   status: TreasuryPublishingStatus
   sortOrder: number
+  codePrefix?: string
+}
+
+export interface TreasuryOwnedCopy {
+  id: string
+  cardId: string
+  editionId: string
+  productionNumber: number | null
+  acquiredAt: string | null
+  source: 'physical_code' | 'legacy_migration' | 'admin'
+  transferable: boolean
 }
 
 export interface TreasuryCard {
@@ -526,11 +552,53 @@ export interface TreasuryCard {
   quantity?: number
   firstCollectedAt?: string | null
   lastCollectedAt?: string | null
+  copies?: TreasuryOwnedCopy[]
 }
 
 export interface TreasuryState {
   editions: TreasuryEdition[]
   cards: TreasuryCard[]
+  uniqueCollected?: number
+  totalAvailable?: number
+  completionPercentage?: number
+  treasuryBanned?: boolean
+}
+
+export interface TreasuryRedemptionSession {
+  orderId: string
+  eligibleCodeCount: number
+  redeemedCodeCount: number
+  remainingCodeCount: number
+  failedAttempts: number
+  attemptLimit: number
+  attemptsRemaining: number
+  locked: boolean
+}
+
+export interface TreasuryRedemptionResult extends TreasuryRedemptionSession {
+  accepted: Array<{ index: number; cardId: string; title: string; instanceId: string }>
+  rejected: Array<{ index: number; reason: string }>
+}
+
+export interface TreasuryTransaction {
+  id: string
+  type: 'code_assignment' | 'code_unassignment' | 'redemption' | 'failed_code' | 'transfer' | 'admin_add' | 'admin_remove' | 'attempt_grant' | 'allowance_change' | 'ban' | 'unban'
+  accountId: string
+  otherAccountId?: string
+  orderId?: string
+  cardId?: string
+  instanceId?: string
+  codeSuffix?: string
+  detail?: string
+  createdAt: string | null
+  actorId?: string
+}
+
+export interface TreasuryAdminCustomerState extends TreasuryState {
+  accountId: string
+  banned: boolean
+  orders: Array<TreasuryRedemptionSession & { status: OrderStatus }>
+  transactions: TreasuryTransaction[]
 }
 
 export interface TreasuryCodeBatch {
@@ -548,4 +616,56 @@ export interface TreasuryCodeBatch {
 
 export interface TreasuryAdminState extends TreasuryState {
   batches: TreasuryCodeBatch[]
+  transactions?: TreasuryTransaction[]
+}
+
+export interface TermsPolicyContent {
+  title: string
+  description: string
+  bodyMarkdown: string
+  version: string
+  effectiveDate: string
+}
+
+export interface TermsPolicyDocument extends TermsPolicyContent {
+  slug: 'terms'
+  status: 'draft' | 'published'
+  revision: number
+  updatedAt?: unknown
+  updatedBy?: string
+  publishedAt?: unknown
+  publishedBy?: string
+}
+
+export interface TermsPolicyEditorState {
+  draft: TermsPolicyDocument
+  published: TermsPolicyDocument | null
+}
+
+export type SocialMediaPlatform = 'instagram' | 'tiktok' | 'youtube' | 'facebook' | 'x'
+
+export interface SocialMediaLink {
+  id: SocialMediaPlatform
+  label: string
+  url: string
+  visible: boolean
+}
+
+export interface SocialMediaLinksContent {
+  heading: string
+  links: SocialMediaLink[]
+}
+
+export interface SocialMediaLinksDocument extends SocialMediaLinksContent {
+  status: 'draft' | 'published'
+  revision: number
+  updatedAt?: unknown
+  updatedBy?: string
+  publishedAt?: unknown
+  publishedBy?: string
+}
+
+export interface SocialMediaLinksEditorState {
+  draft: SocialMediaLinksDocument
+  published: SocialMediaLinksDocument | null
 }

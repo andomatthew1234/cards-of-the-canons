@@ -20,6 +20,8 @@ import { OrdersPage } from './OrdersPage'
 import { ProductEditorPage } from './ProductEditorPage'
 import { ProductsPage } from './ProductsPage'
 import { SettingsPage } from './SettingsPage'
+import { TermsSettingsPage } from './TermsSettingsPage'
+import { SocialMediaSettingsPage } from './SocialMediaSettingsPage'
 import { WebsiteEditorPage } from './WebsiteEditorPage'
 import { WebsiteDraftPreviewPage } from './WebsiteDraftPreview'
 import { TreasuryPage } from './TreasuryPage'
@@ -59,6 +61,8 @@ export function AdminRoutes() {
     <Route path="content/:page" element={<Navigate to="/admin/website" replace />} />
     <Route path="analytics" element={<AnalyticsPage />} />
     <Route path="settings" element={<SettingsPage />} />
+    <Route path="settings/terms" element={<TermsSettingsPage />} />
+    <Route path="settings/social-media" element={<SocialMediaSettingsPage />} />
     <Route path="*" element={<div className="admin-access-card"><h1>Admin page not found</h1><p>The requested workspace page does not exist.</p><Link className="button secondary" to="/admin">Return to dashboard</Link></div>} />
   </Routes></AdminLayout></AdminDataProvider>
 }

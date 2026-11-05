@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { vi } from 'vitest'
 import { AccountCentreShell } from '../src/components/account/AccountChrome'
-import { AccountOverview, AccountOrdersPage } from '../src/pages/account/AccountCentrePages'
+import { AccountOverview, AccountOrdersPage, AccountPrivacyPage } from '../src/pages/account/AccountCentrePages'
 import { RecentActivityPage } from '../src/pages/account/RecentActivityPage'
 
 const mocks = vi.hoisted(() => ({
@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
     logOut: vi.fn(),
   },
   getProfile: vi.fn(),
+  saveAutofillPreference: vi.fn(),
   getPolicy: vi.fn(),
   listOrders: vi.fn(),
   mailingStatus: vi.fn(),
@@ -25,10 +26,18 @@ const mocks = vi.hoisted(() => ({
   leaveMailing: vi.fn(),
   listActivity: vi.fn(),
   communityAttention: vi.fn(),
+  getTreasury: vi.fn(),
 }))
 
-vi.mock('../src/context/AuthContext', () => ({ useAuth: () => mocks.auth }))
-vi.mock('../src/lib/accounts', () => ({ getUserProfile: mocks.getProfile, getAccountSecurityPolicy: mocks.getPolicy }))
+vi.mock('../src/context/AuthContext', () => ({
+  useAuth: () => mocks.auth,
+  friendlyAuthError: (error: unknown) => error instanceof Error ? error.message : 'Account action failed.',
+}))
+vi.mock('../src/lib/accounts', () => ({
+  getUserProfile: mocks.getProfile,
+  getAccountSecurityPolicy: mocks.getPolicy,
+  saveCheckoutAndEnquiryAutofillPreference: mocks.saveAutofillPreference,
+}))
 vi.mock('../src/lib/data', () => ({
   listOrdersForUser: mocks.listOrders,
   getMyMailingListStatus: mocks.mailingStatus,
@@ -37,6 +46,7 @@ vi.mock('../src/lib/data', () => ({
 }))
 vi.mock('../src/lib/accountActivity', () => ({ listAccountActivity: mocks.listActivity }))
 vi.mock('../src/lib/community', () => ({ getCommunityAttentionCount: mocks.communityAttention }))
+vi.mock('../src/lib/treasury', () => ({ getMyTreasury: mocks.getTreasury }))
 
 const securityResponse = {
   policy: {
@@ -57,6 +67,7 @@ describe('routed Account Centre', () => {
     mocks.auth.mfaFactors = []
     mocks.auth.logOut.mockReset()
     mocks.getProfile.mockReset().mockResolvedValue({ displayName: 'Matthew Anderson', email: 'customer@example.com', phone: '0400000123' })
+    mocks.saveAutofillPreference.mockReset().mockResolvedValue({ updated: true })
     mocks.getPolicy.mockReset().mockResolvedValue(securityResponse)
     mocks.listOrders.mockReset().mockResolvedValue([])
     mocks.mailingStatus.mockReset().mockResolvedValue({ email: 'customer@example.com', emailVerified: true, status: 'unsubscribed' })
@@ -64,6 +75,28 @@ describe('routed Account Centre', () => {
     mocks.leaveMailing.mockReset().mockResolvedValue({ email: 'customer@example.com', emailVerified: true, status: 'unsubscribed' })
     mocks.listActivity.mockReset().mockResolvedValue([])
     mocks.communityAttention.mockReset().mockResolvedValue(0)
+    mocks.getTreasury.mockReset().mockResolvedValue({
+      editions: [{ id: 'edition-1', title: 'The Twelve Disciples', description: '', coverImageUrl: '', coverImageAlt: '', status: 'published', sortOrder: 1, codePrefix: 'A' }],
+      cards: Array.from({ length: 12 }, (_, index) => ({
+        id: `card-${index + 1}`,
+        editionId: 'edition-1',
+        number: String(index + 1).padStart(2, '0'),
+        title: index === 5 ? 'Saint Andrew' : index === 2 ? 'Saint Peter' : `Saint ${index + 1}`,
+        teaser: 'A Saint waiting to be revealed.',
+        story: index === 2 || index === 5 ? 'Revealed story.' : '',
+        imageUrl: index === 2 || index === 5 ? `/saint-${index + 1}.jpg` : '',
+        imageAlt: index === 2 || index === 5 ? `Saint ${index + 1}` : '',
+        status: 'published',
+        sortOrder: index + 1,
+        collected: index === 2 || index === 5,
+        quantity: index === 2 || index === 5 ? 1 : 0,
+        copies: [],
+      })),
+      uniqueCollected: 2,
+      totalAvailable: 12,
+      completionPercentage: 17,
+      treasuryBanned: false,
+    })
   })
 
   it('uses persistent destination navigation rather than in-page anchor navigation', async () => {
@@ -98,6 +131,16 @@ describe('routed Account Centre', () => {
     expect(accountToggle).toHaveTextContent('Administrator')
     expect(accountToggle.querySelector('.account-profile-icon')).toBeInTheDocument()
     expect(screen.queryByText('Doxa')).not.toBeInTheDocument()
+  })
+
+  it('reports a failed sidebar sign-out instead of leaving a dead-looking button', async () => {
+    mocks.auth.logOut.mockRejectedValueOnce(new Error('Sign out is temporarily unavailable.'))
+    render(<MemoryRouter initialEntries={['/account']}><AccountCentreShell title="Overview" eyebrow="Account" description="Overview."><p>Overview destination</p></AccountCentreShell></MemoryRouter>)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Sign out is temporarily unavailable.')
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeEnabled()
   })
 
   it('selects Overview by default without expanding account, profile, and security', () => {
@@ -138,6 +181,23 @@ describe('routed Account Centre', () => {
     await waitFor(() => expect(mocks.getProfile).toHaveBeenCalledWith('customer-1'))
   })
 
+  it('shows a security-board-sized Digital Treasury panel with unlocked Saints first', async () => {
+    render(<MemoryRouter initialEntries={['/account']}><AccountOverview /></MemoryRouter>)
+
+    const treasuryPanel = await screen.findByRole('region', { name: 'Digital Treasury overview' })
+    expect(treasuryPanel).toHaveClass('account-overview-treasury')
+    expect(treasuryPanel).toHaveTextContent('17%')
+    expect(treasuryPanel).toHaveTextContent('2 of 12 unique Saints revealed')
+    expect(within(treasuryPanel).getByRole('link', { name: /Open My Treasury/i })).toHaveAttribute('href', '/account/treasury')
+
+    const rail = within(treasuryPanel).getByRole('list', { name: 'Twelve potential Saint unlocks' })
+    const cards = within(rail).getAllByRole('listitem')
+    expect(cards).toHaveLength(12)
+    expect(cards[0]).toHaveTextContent('Saint Peter')
+    expect(cards[1]).toHaveTextContent('Saint Andrew')
+    expect(cards[2]).toHaveTextContent('Locked Saint')
+  })
+
   it('updates the mailing-list preference from the Overview switch', async () => {
     render(<MemoryRouter initialEntries={['/account']}><AccountOverview /></MemoryRouter>)
     const mailingSwitch = await screen.findByRole('switch', { name: 'Receive mailing-list updates' })
@@ -145,7 +205,20 @@ describe('routed Account Centre', () => {
     await userEvent.click(mailingSwitch)
     await waitFor(() => expect(mocks.joinMailing).toHaveBeenCalledWith('account_settings'))
     expect(mailingSwitch).toBeChecked()
-    expect(screen.getByText('Mailing list turned on.')).toBeInTheDocument()
+    expect(screen.getByText('Mailing list turned on. A confirmation email has been sent for your records.')).toBeInTheDocument()
+  })
+
+  it('allows customers to disable automatic checkout and enquiry details', async () => {
+    mocks.getProfile.mockResolvedValueOnce({
+      displayName: 'Matthew Anderson', email: 'customer@example.com',
+      preferences: { checkoutAndEnquiryAutofill: true, mailingListRequested: false, recoveryPhoneProvided: false },
+    })
+    render(<MemoryRouter initialEntries={['/account/privacy']}><AccountPrivacyPage /></MemoryRouter>)
+    const turnOff = await screen.findByRole('button', { name: 'Turn off' })
+    await userEvent.click(turnOff)
+    await waitFor(() => expect(mocks.saveAutofillPreference).toHaveBeenCalledWith('customer-1', false))
+    expect(screen.getByText('Account-detail autofill is disabled.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Turn on' })).toBeEnabled()
   })
 
   it('integrates real available order data into the dedicated purchase destination', async () => {

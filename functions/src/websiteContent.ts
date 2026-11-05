@@ -5,6 +5,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import { z } from 'zod'
 import { requireAdminContext, type CallableRequestLike } from './authorization'
 import { db } from './firebase'
+import { ensurePublicImageDownloadToken } from './images'
 import { defaultWebsiteContent, homeSectionsSchema, parseWebsiteContent, websiteContentSchema, type WebsiteContent } from './websiteContentSchema'
 
 const callableOptions = { region: 'australia-southeast1', enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true', maxInstances: 10 }
@@ -14,17 +15,6 @@ const versions = db.collection('websiteContentVersions')
 const mediaLocks = db.collection('websiteMediaLocks')
 const MAX_VERSIONS = 25
 const legacyHomeSectionsSchema = homeSectionsSchema.omit({ newsletter: true })
-
-type ListedStorageFile = {
-  name: string
-  getMetadata: () => Promise<[{
-    size?: string | number
-    contentType?: string
-    timeCreated?: string
-    updated?: string
-    generation?: string | number
-  }]>
-}
 
 const revision = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 const saveDraftSchema = z.object({ expectedRevision: revision, content: websiteContentSchema }).strict()
@@ -365,8 +355,9 @@ export const listWebsiteMedia = onCall(callableOptions, async (request) => {
   const input = parseInput(listMediaSchema, request.data ?? {})
   const [files, nextQuery] = await getStorage().bucket().getFiles({ prefix: 'page-images/', autoPaginate: false, maxResults: input.limit ?? 50, ...(input.pageToken ? { pageToken: input.pageToken } : {}) })
   const references = await contentReferenceLocations()
-  const items = await Promise.all(files.map(async (file: ListedStorageFile) => {
+  const items = await Promise.all(files.map(async (file) => {
     const [metadata] = await file.getMetadata()
+    await ensurePublicImageDownloadToken(file, metadata)
     const locations = references.get(file.name) ?? []
     const lock = await mediaLocks.doc(mediaLockId(file.name)).get()
     return {

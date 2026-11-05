@@ -1,6 +1,6 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { Journal, JournalArticle } from '../src/pages/Journal'
 import { JournalPage } from '../src/pages/admin/JournalPage'
@@ -34,6 +34,13 @@ const article = (id: string, title: string): Article => ({
   seoTitle: '', seoDescription: '', featured: false, status: 'published', publishedAt: '2026-10-24T00:00:00.000Z',
 })
 
+const articlePage = (prefix: string, count = 10) => Array.from({ length: count }, (_, index) => article(`${prefix}-${index}`, `${prefix} story ${index + 1}`))
+
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="location">{location.pathname}{location.search}</output>
+}
+
 describe('public Journal reliability', () => {
   beforeEach(() => {
     vi.mocked(dataApi.listPublishedJournalArticles).mockReset()
@@ -41,7 +48,10 @@ describe('public Journal reliability', () => {
     vi.mocked(dataApi.listJournalArticlesAdminPage).mockReset()
     vi.mocked(dataApi.getJournalArticleAdmin).mockReset()
   })
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
 
   it('does not substitute hard-coded stories when the managed archive is empty', async () => {
     vi.mocked(dataApi.listPublishedJournalArticles).mockResolvedValue({ articles: [], nextCursor: null })
@@ -49,6 +59,31 @@ describe('public Journal reliability', () => {
 
     expect(await screen.findByText('No Journal stories have been published yet.')).toBeInTheDocument()
     expect(screen.queryByText('Building the Doxa Treasury')).not.toBeInTheDocument()
+  })
+
+  it('expands only the Journal story crossing the viewport focus line', async () => {
+    let focusObserver: IntersectionObserverCallback | undefined
+    const disconnect = vi.fn()
+    class FocusObserver {
+      constructor(callback: IntersectionObserverCallback) { focusObserver = callback }
+      observe() {}
+      unobserve() {}
+      disconnect() { disconnect() }
+      takeRecords() { return [] }
+      root = null
+      rootMargin = '-46% 0px -46% 0px'
+      thresholds = [0]
+    }
+    vi.stubGlobal('IntersectionObserver', FocusObserver)
+    vi.mocked(dataApi.listPublishedJournalArticles).mockResolvedValue({ articles: [article('article-focused', 'Focused story')], nextCursor: null, totalCount: 1 })
+    render(<MemoryRouter><Journal /></MemoryRouter>)
+
+    const card = await screen.findByRole('article')
+    expect(card).not.toHaveClass('is-scroll-focused')
+    act(() => focusObserver?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver))
+    expect(card).toHaveClass('is-scroll-focused')
+    act(() => focusObserver?.([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver))
+    expect(card).not.toHaveClass('is-scroll-focused')
   })
 
   it('shows an unavailable state instead of stale stories when loading fails', async () => {
@@ -69,16 +104,65 @@ describe('public Journal reliability', () => {
     expect(dataApi.getPublishedJournalArticle).toHaveBeenCalledTimes(2)
   })
 
-  it('loads older public stories one cursor page at a time without duplicates', async () => {
+  it('shows ten stories per page with URL-backed numbered navigation', async () => {
+    const firstPage = articlePage('Newest')
+    vi.mocked(dataApi.listPublishedJournalArticles)
+      .mockResolvedValueOnce({ articles: firstPage, nextCursor: 'newest-9' })
+      .mockResolvedValueOnce({ articles: [article('article-older', 'Older story')], nextCursor: null })
+    render(<MemoryRouter initialEntries={['/journal']}><Journal /><LocationProbe /></MemoryRouter>)
+
+    expect(await screen.findByText('Newest story 1')).toBeInTheDocument()
+    expect(screen.getByText('Newest story 10')).toBeInTheDocument()
+    expect(screen.queryByText('Older story')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Go to Journal page 2' }))
+    expect(await screen.findByText('Older story')).toBeInTheDocument()
+    expect(screen.queryByText('Newest story 1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/journal?page=2')
+    expect(dataApi.listPublishedJournalArticles).toHaveBeenNthCalledWith(2, 'newest-9')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Previous Journal page' }))
+    expect(await screen.findByText('Newest story 1')).toBeInTheDocument()
+    expect(screen.queryByText('Older story')).not.toBeInTheDocument()
+    expect(dataApi.listPublishedJournalArticles).toHaveBeenCalledTimes(2)
+  })
+
+  it('restores a requested Journal page after a refresh', async () => {
+    vi.mocked(dataApi.listPublishedJournalArticles)
+      .mockResolvedValueOnce({ articles: articlePage('First'), nextCursor: 'first-9' })
+      .mockResolvedValueOnce({ articles: [article('second-page', 'Second page story')], nextCursor: null })
+    render(<MemoryRouter initialEntries={['/journal?page=2']}><Journal /></MemoryRouter>)
+
+    expect(await screen.findByText('Second page story')).toBeInTheDocument()
+    expect(screen.queryByText('First story 1')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Go to Journal page 2' })).toHaveAttribute('aria-current', 'page')
+  })
+
+  it('searches Journal metadata and lets readers clear the query', async () => {
+    const searchable = { ...article('article-searchable', 'A quiet beginning'), authorName: 'John Chapman' }
+    vi.mocked(dataApi.listPublishedJournalArticles).mockResolvedValue({ articles: [searchable], nextCursor: null })
+    render(<MemoryRouter><Journal /></MemoryRouter>)
+
+    expect(await screen.findByText('A quiet beginning')).toBeInTheDocument()
+    const search = screen.getByRole('searchbox', { name: 'Search the Journal' })
+    await userEvent.type(search, 'john chapman')
+    expect(screen.getByText('A quiet beginning')).toBeInTheDocument()
+    await userEvent.clear(search)
+    await userEvent.type(search, 'missing story')
+    expect(screen.getByText(/No Journal stories match/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+    expect(search).toHaveValue('')
+  })
+
+  it('continues through the published archive while a search is active', async () => {
     vi.mocked(dataApi.listPublishedJournalArticles)
       .mockResolvedValueOnce({ articles: [article('article-first', 'Newest story')], nextCursor: 'article-first' })
-      .mockResolvedValueOnce({ articles: [article('article-older', 'Older story')], nextCursor: null })
+      .mockResolvedValueOnce({ articles: [article('article-older', 'Hidden older story')], nextCursor: null })
     render(<MemoryRouter><Journal /></MemoryRouter>)
 
     expect(await screen.findByText('Newest story')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Load older stories' }))
-    expect(await screen.findByText('Older story')).toBeInTheDocument()
-    expect(screen.getAllByText('Newest story')).toHaveLength(1)
+    await userEvent.type(screen.getByRole('searchbox', { name: 'Search the Journal' }), 'Hidden older')
+    expect(await screen.findByText('Hidden older story')).toBeInTheDocument()
+    expect(screen.queryByText('Newest story')).not.toBeInTheDocument()
     expect(dataApi.listPublishedJournalArticles).toHaveBeenNthCalledWith(2, 'article-first')
   })
 

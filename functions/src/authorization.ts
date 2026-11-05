@@ -221,7 +221,7 @@ export function requireAdminContext(request: CallableRequestLike, deps?: Authori
 }
 
 export interface DestructiveActionInput {
-  action: 'disable' | 'enable' | 'delete' | 'revokeAdmin'
+  action: 'disable' | 'enable' | 'delete' | 'grantAdmin' | 'revokeAdmin'
   callerUid: string
   targetUid: string
   callerRole: AccountRole | null
@@ -238,17 +238,23 @@ export interface DestructiveActionInput {
  */
 export function assertAccountActionAllowed(input: DestructiveActionInput): void {
   const destructive = input.action === 'disable' || input.action === 'delete' || input.action === 'revokeAdmin'
-  if (!destructive) return
-  if (input.callerUid === input.targetUid) {
-    throw new HttpsError('failed-precondition', 'Administrators cannot remove their own access.')
+  const changesAdminRole = input.action === 'grantAdmin' || input.action === 'revokeAdmin'
+  if (!destructive && !changesAdminRole) return
+  if (input.callerUid === input.targetUid && (destructive || changesAdminRole)) {
+    throw new HttpsError('failed-precondition', 'Administrators cannot change their own access or administrator role.')
   }
-  const protectedTarget = input.targetRole === 'owner' || input.targetIsAdmin
-  if (!protectedTarget) return
-  if (input.callerRole !== 'owner') {
+
+  // Owner roles are never managed from the ordinary customer control. Other
+  // administrators may grant or revoke the non-owner administrator role, but
+  // disabling/deleting another administrator remains owner-only.
+  if (input.targetRole === 'owner' && input.callerRole !== 'owner') {
     throw new HttpsError('permission-denied', 'An owner administrator is required to change another administrator.')
   }
-  if (input.targetRole === 'owner' && input.ownerCount <= 1) {
+  if (input.targetRole === 'owner' && destructive && input.ownerCount <= 1) {
     throw new HttpsError('failed-precondition', 'The last owner account cannot be disabled, deleted or demoted.')
+  }
+  if (input.targetIsAdmin && input.targetRole !== 'owner' && (input.action === 'disable' || input.action === 'delete') && input.callerRole !== 'owner') {
+    throw new HttpsError('permission-denied', 'An owner administrator is required to disable or delete another administrator.')
   }
 }
 

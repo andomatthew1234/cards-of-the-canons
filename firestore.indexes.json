@@ -7,7 +7,8 @@
     { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "userId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }] },
     { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "inventoryState", "order": "ASCENDING" }, { "fieldPath": "expiresAt", "order": "ASCENDING" }] },
     { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "inventoryScope", "order": "ASCENDING" }, { "fieldPath": "inventoryState", "order": "ASCENDING" }] },
-    { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "inventoryScope", "order": "ASCENDING" }, { "fieldPath": "inventoryState", "order": "ASCENDING" }, { "fieldPath": "userId", "order": "ASCENDING" }] }
+    { "collectionGroup": "orders", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "inventoryScope", "order": "ASCENDING" }, { "fieldPath": "inventoryState", "order": "ASCENDING" }, { "fieldPath": "userId", "order": "ASCENDING" }] },
+    { "collectionGroup": "_treasuryTransactions", "queryScope": "COLLECTION", "fields": [{ "fieldPath": "accountId", "order": "ASCENDING" }, { "fieldPath": "createdAt", "order": "DESCENDING" }] }
   ],
   "fieldOverrides": [
     {

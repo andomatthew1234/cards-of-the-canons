@@ -276,12 +276,12 @@ async function resolveRecipients(campaign: CampaignDraft) {
   if (campaign.purpose === 'marketing') {
     const allowed = new Set(await subscribedEmails())
     const denied = requested.filter((email) => !allowed.has(email))
-    if (denied.length) throw new HttpsError('failed-precondition', 'Marketing campaigns can only be sent to confirmed subscribers.')
+    if (denied.length) throw new HttpsError('failed-precondition', 'Marketing campaigns can only be sent to active subscribers.')
     return requested
   }
   const allowed = new Set([...(await verifiedAccountEmails()), ...(await subscribedEmails())])
   const denied = requested.filter((email) => !allowed.has(email))
-  if (denied.length) throw new HttpsError('failed-precondition', 'One or more selected recipients is not an active verified account or confirmed subscriber.')
+  if (denied.length) throw new HttpsError('failed-precondition', 'One or more selected recipients is not an active website account or mailing-list subscriber.')
   return requested
 }
 

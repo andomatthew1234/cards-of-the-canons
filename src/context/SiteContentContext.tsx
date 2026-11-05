@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { siteSettings as defaultSettings } from '../config'
-import { getPageContent, getSiteSettings } from '../lib/data'
+import { getPageContent, getPublishedSocialMediaLinks, getSiteSettings } from '../lib/data'
 import { BRAND_NAME, LEGACY_BRAND_NAME, replaceLegacyBrand } from '../lib/brand'
 import { normaliseSiteTheme } from '../lib/siteTheme'
 import { cloneWebsiteContent, defaultWebsiteContent, type WebsiteContent } from '../cms/websiteContent'
 import { getPublishedWebsiteContent } from '../lib/websiteEditor'
-import type { PageContent, SiteSettings } from '../types'
+import type { PageContent, SiteSettings, SocialMediaLinksDocument } from '../types'
 import { SiteThemeProvider } from './SiteThemeContext'
 
 export const defaultPageContent: Record<PageContent['page'], PageContent> = {
@@ -124,12 +124,12 @@ function contentPages(content: WebsiteContent): Record<PageContent['page'], Page
   }
 }
 
-interface SiteContentValue { settings: SiteSettings; pages: Record<PageContent['page'], PageContent>; website: WebsiteContent; ready: boolean }
+interface SiteContentValue { settings: SiteSettings; pages: Record<PageContent['page'], PageContent>; website: WebsiteContent; socialMedia: SocialMediaLinksDocument | null; ready: boolean }
 // Standalone component tests and isolated previews consume the context without
 // the async provider, so the context fallback is immediately renderable. The
 // real provider below still starts unready and gates public copy until Firebase
 // has returned the published document.
-const SiteContentContext = createContext<SiteContentValue>({ settings: defaultSettings, pages: defaultPageContent, website:defaultWebsiteContent, ready:true })
+const SiteContentContext = createContext<SiteContentValue>({ settings: defaultSettings, pages: defaultPageContent, website:defaultWebsiteContent, socialMedia:null, ready:true })
 
 /**
  * Supplies an administrator-owned draft to the real storefront components.
@@ -141,20 +141,24 @@ export function SiteContentPreviewProvider({ content, children }: { content: Web
     settings: contentSettings(content),
     pages: contentPages(content),
     website: content,
+    socialMedia: null,
     ready: true,
   }), [content])
   return <SiteContentContext.Provider value={value}><SiteThemeProvider theme={value.settings.theme}>{children}</SiteThemeProvider></SiteContentContext.Provider>
 }
 
 export function SiteContentProvider({ children }: { children: ReactNode }) {
-  const [value, setValue] = useState<SiteContentValue>({ settings: defaultSettings, pages: defaultPageContent, website:defaultWebsiteContent, ready:false })
+  const [value, setValue] = useState<SiteContentValue>({ settings: defaultSettings, pages: defaultPageContent, website:defaultWebsiteContent, socialMedia:null, ready:false })
   useEffect(() => {
     let active = true
     const load = () => void (async () => {
-      const published = await getPublishedWebsiteContent().catch(() => null)
+      const [published, socialMedia] = await Promise.all([
+        getPublishedWebsiteContent().catch(() => null),
+        getPublishedSocialMediaLinks().catch(() => null),
+      ])
       if (!active) return
       if (published) {
-        setValue({ settings:contentSettings(published),pages:contentPages(published),website:published,ready:true })
+        setValue({ settings:contentSettings(published),pages:contentPages(published),website:published,socialMedia,ready:true })
         return
       }
       const [settings, home, about] = await Promise.all([getSiteSettings().catch(() => null), getPageContent('home').catch(() => null), getPageContent('about').catch(() => null)])
@@ -162,7 +166,7 @@ export function SiteContentProvider({ children }: { children: ReactNode }) {
       const legacySettings = normaliseSiteSettings(settings ?? defaultSettings)
       const legacyPages = { home:normalisePageContent(home ?? defaultPageContent.home),about:normalisePageContent(about ?? defaultPageContent.about) }
       const website = legacyWebsiteContent(legacySettings,legacyPages)
-      setValue({ settings:legacySettings,pages:legacyPages,website,ready:true })
+      setValue({ settings:legacySettings,pages:legacyPages,website,socialMedia,ready:true })
     })()
     load()
     window.addEventListener('cards:content-updated', load)

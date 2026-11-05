@@ -24,7 +24,7 @@ export {
   saveNewsletterCampaign, sendNewsletterCampaign, sendNewsletterTest,
   suppressNewsletterSubscriber,
 } from './newsletterCampaigns'
-export { publishStagedImage } from './images'
+export { listProductMedia, publishStagedImage } from './images'
 export { deleteJournalArticle, getJournalArticleAdmin, listJournalArticlesAdmin, publishJournalArticle, retryJournalNotification, saveJournalArticle } from './journal'
 export {
   cancelScheduledEmailCampaign, deleteEmailCampaign, listEmailCampaignWorkspace, searchEmailCampaignAudience,
@@ -36,6 +36,8 @@ export {
   listWebsiteMedia, publishWebsiteContent, restoreWebsiteContentVersion,
   saveWebsiteContentDraft,
 } from './websiteContent'
+export { getTermsPolicyEditorState, publishTermsPolicy, saveTermsPolicyDraft } from './termsPolicy'
+export { getSocialMediaLinksEditorState, publishSocialMediaLinks, saveSocialMediaLinksDraft } from './socialMediaLinks'
 export { resumeAccountDeletions } from './accountDeletion'
 export { updateMyProfile } from './profile'
 export { beginAccountOnboarding, completeAccountOnboarding } from './onboarding'
@@ -44,6 +46,10 @@ export {
   generateTreasuryCodeBatch, getMyTreasury, getTreasuryAdminState, redeemTreasuryCode,
   revokeTreasuryCodeBatch, saveTreasuryCard, saveTreasuryEdition,
 } from './treasury'
+export {
+  adminManageTreasury, assignPhysicalCodesToOrder, beginTreasuryRedemption,
+  getTreasuryCustomerAdmin, redeemPhysicalTreasuryCards, transferTreasuryCard,
+} from './physicalTreasury'
 
 const region = 'australia-southeast1'
 
@@ -64,9 +70,9 @@ export const submitEnquiry = onCall({ region, enforceAppCheck: process.env.FUNCT
   return { accepted: true }
 })
 
-// Newsletter consent is handled entirely by ./newsletter: pending/double
-// opt-in with hashed, single-use, expiring mailbox tokens, append-only consent
-// evidence and token-based unsubscribe. No endpoint assumes a mail sender.
+// Newsletter consent is handled entirely by ./newsletter: explicit consent
+// activates immediately, evidence is append-only, and every confirmation
+// notice carries a hashed-token unsubscribe path.
 
 export const recordAnalyticsEvent = onCall({
   region,
@@ -186,6 +192,36 @@ export const manageUserAccount = onCall(protectedOptions, async (request) => {
   }
   if (action === 'enable' && control?.deletionState === 'pending') {
     throw new HttpsError('failed-precondition', 'This account is still being deleted.')
+  }
+
+  if (action === 'grantAdmin') {
+    if (target.disabled || control?.disabled === true || control?.deleted === true) {
+      throw new HttpsError('failed-precondition', 'Restore this account before granting administrator access.')
+    }
+    if (!target.emailVerified) {
+      throw new HttpsError('failed-precondition', 'The account email must be verified before administrator access can be granted.')
+    }
+    if (target.customClaims?.admin === true) return { updated: false }
+
+    const roleRef = db.collection('accountRoles').doc(uid)
+    await roleRef.set({
+      role: 'admin',
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedBy: caller.uid,
+    }, { merge: true })
+    try {
+      await getAuth().setCustomUserClaims(uid, { ...(target.customClaims ?? {}), admin: true })
+    } catch (error) {
+      // A role record never grants access by itself, but restore its previous
+      // value so a failed Auth update does not leave misleading admin data.
+      if (targetRole) {
+        await roleRef.set({ role: targetRole, updatedAt: FieldValue.serverTimestamp(), updatedBy: caller.uid }, { merge: true })
+      } else {
+        await roleRef.delete()
+      }
+      throw error
+    }
+    await getAuth().revokeRefreshTokens(uid)
   }
 
   if (action === 'disable' || action === 'enable') {

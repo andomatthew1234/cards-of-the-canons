@@ -19,6 +19,7 @@ const protectedOptions = { region, enforceAppCheck: process.env.FUNCTIONS_EMULAT
 export const profileUpdateSchema = z.object({
   displayName: z.string().trim().min(1).max(80).optional(),
   phone: z.string().trim().max(30).nullable().optional(),
+  checkoutAndEnquiryAutofill: z.boolean().optional(),
 }).strict()
 
 export type ProfileUpdate = z.infer<typeof profileUpdateSchema>
@@ -55,6 +56,11 @@ export async function applyProfileUpdate(uid: string, input: ProfileUpdate, env:
   const email = typeof account.email === 'string' ? account.email.trim().toLowerCase() : ''
   const displayName = boundedName(input.displayName ?? current?.displayName ?? account.displayName) || 'Customer'
   const currentPhone = typeof current?.phone === 'string' ? current.phone : ''
+  const currentPreferences = typeof current?.preferences === 'object' && current.preferences !== null
+    ? current.preferences as Record<string, unknown>
+    : {}
+  const currentAutofill = currentPreferences.checkoutAndEnquiryAutofill !== false
+  const checkoutAndEnquiryAutofill = input.checkoutAndEnquiryAutofill ?? currentAutofill
   let phone: string
   if (input.phone === undefined) phone = currentPhone
   else if (input.phone === null) phone = ''
@@ -64,6 +70,7 @@ export async function applyProfileUpdate(uid: string, input: ProfileUpdate, env:
     && boundedName(current?.displayName) === displayName
     && (typeof current?.phone === 'string' ? current.phone : '') === phone
     && boundedName(current?.email) === email
+    && (input.checkoutAndEnquiryAutofill === undefined || currentAutofill === checkoutAndEnquiryAutofill)
   if (unchanged) return { updated: false }
 
   await env.rateLimit(`profile:${uid}`, 12, 60)
@@ -71,6 +78,9 @@ export async function applyProfileUpdate(uid: string, input: ProfileUpdate, env:
     displayName,
     email,
     phone: phone || FieldValue.delete(),
+    ...(input.checkoutAndEnquiryAutofill === undefined ? {} : {
+      preferences: { ...currentPreferences, checkoutAndEnquiryAutofill },
+    }),
     updatedAt: FieldValue.serverTimestamp(),
     ...(current ? {} : { createdAt: FieldValue.serverTimestamp() }),
   }

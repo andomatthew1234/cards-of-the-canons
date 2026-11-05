@@ -35,7 +35,7 @@ beforeEach(() => {
 })
 
 describe('newsletter signup reporting', () => {
-  it('uses the same privacy-preserving response for a pending signup', async () => {
+  it('uses the same privacy-preserving response for a new signup', async () => {
     const user = userEvent.setup()
     mocks.saveNewsletter.mockResolvedValue({ demo: false, status: 'pending', confirmationEmailSent: false, deliveryReason: 'no-transport-configured' })
     render(<Newsletter />)
@@ -43,8 +43,8 @@ describe('newsletter signup reporting', () => {
     await submitSignup(user, 'jane@example.com')
 
     await waitFor(() => expect(mocks.saveNewsletter).toHaveBeenCalledWith('jane@example.com', 'home'))
-    expect(await screen.findByText(/if this address can be subscribed/i)).toBeTruthy()
-    expect(screen.queryByText(/on the list/i)).toBeNull()
+    expect(await screen.findByText(/no further action is required/i)).toBeTruthy()
+    expect(screen.queryByText(/confirmation link/i)).toBeNull()
   })
 
   it('does not reveal an existing confirmed subscription', async () => {
@@ -54,7 +54,7 @@ describe('newsletter signup reporting', () => {
 
     await submitSignup(user, 'jane@example.com')
 
-    expect(await screen.findByText(/if this address can be subscribed/i)).toBeTruthy()
+    expect(await screen.findByText(/no further action is required/i)).toBeTruthy()
     expect(screen.queryByText(/on the list/i)).toBeNull()
   })
 
@@ -65,7 +65,7 @@ describe('newsletter signup reporting', () => {
 
     await submitSignup(user, 'jane@example.com')
 
-    expect(await screen.findByText(/if this address can be subscribed/i)).toBeTruthy()
+    expect(await screen.findByText(/no further action is required/i)).toBeTruthy()
     expect(screen.queryByRole('alert')).toBeNull()
   })
 })

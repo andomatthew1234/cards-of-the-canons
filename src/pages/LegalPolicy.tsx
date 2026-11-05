@@ -1,6 +1,10 @@
 import { ArrowLeft, FileCheck2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { MarkdownContent } from "../components/MarkdownContent";
 import { PageMeta } from "../components/PageMeta";
+import { getPublishedTermsPolicy } from "../lib/data";
+import type { TermsPolicyDocument } from "../types";
 import {
   getPublishedLegalPolicy,
   legalPolicyPath,
@@ -9,7 +13,47 @@ import {
 import "./legalPolicy.css";
 
 export function LegalPolicyPage({ slug }: { slug: LegalPolicySlug }) {
-  const policy = getPublishedLegalPolicy(slug);
+  const [termsPolicy, setTermsPolicy] = useState<TermsPolicyDocument | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (slug !== "terms") return;
+    let active = true;
+    setTermsPolicy(undefined);
+    void getPublishedTermsPolicy()
+      .then((policy) => { if (active) setTermsPolicy(policy); })
+      .catch(() => { if (active) setTermsPolicy(null); });
+    return () => { active = false; };
+  }, [slug]);
+
+  if (slug === "terms" && termsPolicy === undefined) {
+    return (
+      <article className="legal-policy-shell legal-policy-loading" aria-busy="true" aria-live="polite">
+        <PageMeta title="Terms and Conditions" description="Doxa Terms and Conditions." canonicalPath={legalPolicyPath(slug)} noIndex />
+        <p>Loading Terms and Conditions…</p>
+      </article>
+    );
+  }
+
+  if (slug === "terms" && termsPolicy) {
+    return (
+      <article className="legal-policy-shell" aria-labelledby="legal-policy-title">
+        <PageMeta title={termsPolicy.title} description={termsPolicy.description} canonicalPath={legalPolicyPath(slug)} />
+        <header className="legal-policy-header">
+          <p className="eyebrow">Legal information</p>
+          <h1 id="legal-policy-title">{termsPolicy.title}</h1>
+          <p>{termsPolicy.description}</p>
+          <dl className="legal-policy-metadata" aria-label="Policy version">
+            <div><dt>Effective</dt><dd><time dateTime={termsPolicy.effectiveDate}>{termsPolicy.effectiveDate}</time></dd></div>
+            <div><dt>Version</dt><dd>{termsPolicy.version}</dd></div>
+          </dl>
+        </header>
+        <MarkdownContent markdown={termsPolicy.bodyMarkdown} className="legal-policy-content" />
+        <footer className="legal-policy-footer"><p>Questions about this policy? <Link to="/contact">Contact Doxa</Link>.</p></footer>
+      </article>
+    );
+  }
+
+  const policy = slug === "terms" ? null : getPublishedLegalPolicy(slug);
 
   if (!policy) {
     return (

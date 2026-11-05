@@ -41,6 +41,35 @@ function iso(value: unknown) {
   return value instanceof Timestamp ? value.toDate().toISOString() : null
 }
 
+function markdownPlainText(markdown: string) {
+  return markdown
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/^\s{0,3}(?:#{1,6}|>|[-+*]|\d+[.)])\s+/gm, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/[*_~|]/g, ' ')
+    .replace(/\\([\\`*_[\]{}()#+\-.!>])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Produces the short story passage used in Journal release emails. Markdown
+ * syntax and raw HTML are removed before truncation, and truncation happens at
+ * a word boundary so recipient previews never end with a cut-off word.
+ */
+export function journalBodyPreview(bodyMarkdown: string, excerpt: string, maxLength = 100) {
+  const candidates = [markdownPlainText(bodyMarkdown), markdownPlainText(excerpt)].filter(Boolean)
+  for (const candidate of candidates) {
+    if (candidate.length <= maxLength) return candidate
+    const boundary = candidate.lastIndexOf(' ', maxLength + 1)
+    if (boundary > 0) return `${candidate.slice(0, boundary).trimEnd()}…`
+  }
+  return ''
+}
+
 function forClient(document: FirebaseFirestore.DocumentSnapshot) {
   const data = document.data() ?? {}
   return {
@@ -157,7 +186,7 @@ export const publishJournalArticle = onCall(providerOptions, async (request) => 
     }, { merge: true })
     if (sendNotification && firstPublication) transaction.set(db.collection('newsletterCampaigns').doc(campaignId), {
       subject: `New from the Doxa Journal: ${fields.title}`.slice(0, 140), previewText: fields.excerpt.slice(0, 180), heading: fields.title,
-      body: `${fields.excerpt}\n\nA new story is now available in the Doxa Journal.`, buttonLabel: 'Read the Journal',
+      body: `${fields.excerpt}\n\n${journalBodyPreview(fields.bodyMarkdown, fields.excerpt)}\n\nContinue reading in the Doxa Journal.`, buttonLabel: 'Read the Journal',
       buttonUrl: `${publicSiteOriginParam.value().replace(/\/$/, '')}/journal/${fields.slug}`, status: 'draft', source: 'journal', articleId: id,
       createdAt: now, updatedAt: now, createdBy: caller.uid, updatedBy: caller.uid, lastError: null,
     })

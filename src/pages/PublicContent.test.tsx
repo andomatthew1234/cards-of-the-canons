@@ -31,5 +31,7 @@ describe('public release content', () => {
 
     expect(screen.queryByText(/reviews coming soon/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /stories from collectors/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /about our story/i })).toHaveAttribute('href', '/about')
+    expect(screen.getByRole('link', { name: /make an account/i })).toHaveAttribute('href', '/account?mode=register')
   })
 })

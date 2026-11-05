@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { authorizeRequest, requireAdminContext, type CallableRequestLike } from './authorization'
 import { db } from './firebase'
 import { checkRateLimit } from './rateLimit'
+import { loadTreasuryStateFor } from './physicalTreasury'
 
 const callableOptions = { region: 'australia-southeast1', enforceAppCheck: process.env.FUNCTIONS_EMULATOR !== 'true' }
 const identifier = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/)
@@ -19,13 +20,14 @@ export const treasuryEditionSchema = z.object({
   coverImageAlt: z.string().trim().max(180),
   status,
   sortOrder: z.number().int().min(0).max(10_000),
+  codePrefix: z.string().trim().toUpperCase().regex(/^[A-Z]$/, 'Use one letter, such as A.').optional(),
   starterCardCount: z.number().int().min(0).max(48).optional(),
 }).strict()
 
 export const treasuryCardSchema = z.object({
   id: identifier.optional(),
   editionId: identifier,
-  number: z.string().trim().min(1).max(24),
+  number: z.string().trim().regex(/^(?:0?[1-9]|[1-9][0-9])$/, 'Use a card position from 01 to 99.'),
   title: z.string().trim().min(2).max(140),
   teaser: z.string().trim().max(400),
   story: z.string().trim().max(12_000),
@@ -88,6 +90,7 @@ function publicEdition(document: FirebaseFirestore.QueryDocumentSnapshot | Fireb
     coverImageAlt: String(data.coverImageAlt || ''),
     status: data.status,
     sortOrder: Number(data.sortOrder || 0),
+    codePrefix: String(data.codePrefix || ''),
   }
 }
 
@@ -129,30 +132,21 @@ function customerCard(card: ReturnType<typeof adminCard>, holding?: Record<strin
 
 export const getMyTreasury = onCall(callableOptions, async (request) => {
   const caller = await authorizeRequest(request as CallableRequestLike)
-  const [editionSnapshot, cardSnapshot, holdingSnapshot] = await Promise.all([
-    db.collection('treasuryEditions').limit(40).get(),
-    db.collection('treasuryCards').limit(400).get(),
-    db.collection('userTreasuries').doc(caller.uid).collection('cards').limit(500).get(),
-  ])
-  const holdings = new Map(holdingSnapshot.docs.map((document) => [document.id, document.data()]))
-  const ownedEditionIds = new Set(cardSnapshot.docs.filter((document) => holdings.has(document.id)).map((document) => String(document.data().editionId || '')))
-  const editions = editionSnapshot.docs.map(publicEdition)
-    .filter((edition) => edition.status === 'published' || ownedEditionIds.has(edition.id))
-    .sort((left, right) => left.sortOrder - right.sortOrder || left.title.localeCompare(right.title))
-  const visibleEditionIds = new Set(editions.map((edition) => edition.id))
-  const cards = cardSnapshot.docs.map(adminCard)
-    .filter((card) => visibleEditionIds.has(card.editionId) && (card.status === 'published' || holdings.has(card.id)))
-    .sort((left, right) => left.sortOrder - right.sortOrder || left.number.localeCompare(right.number, undefined, { numeric: true }))
-    .map((card) => customerCard(card, holdings.get(card.id)))
-  return { editions, cards }
+  return loadTreasuryStateFor(caller.uid)
 })
 
 export const saveTreasuryEdition = onCall(callableOptions, async (request) => {
   const caller = await requireAdminContext(request as CallableRequestLike)
   const parsed = treasuryEditionSchema.safeParse(request.data)
   if (!parsed.success) throw new HttpsError('invalid-argument', parsed.error.issues[0]?.message || 'Check the collection set details.')
-  const { id, starterCardCount = 0, ...edition } = parsed.data
+  const { id, starterCardCount = 0, ...rawEdition } = parsed.data
+  const edition = { ...rawEdition, codePrefix: rawEdition.codePrefix || 'A' }
   const ref = id ? db.collection('treasuryEditions').doc(id) : db.collection('treasuryEditions').doc()
+  const allEditions = await db.collection('treasuryEditions').limit(100).get()
+  const orderedEditions = [...allEditions.docs].sort((left, right) => Number(left.data().sortOrder || 0) - Number(right.data().sortOrder || 0))
+  const prefixConflict = orderedEditions.some((document, index) => document.id !== ref.id
+    && String(document.data().codePrefix || (index === 0 ? 'A' : '')).toUpperCase() === edition.codePrefix)
+  if (prefixConflict) throw new HttpsError('already-exists', 'That physical card set letter is already in use.')
   const existing = await ref.get()
   const batch = db.batch()
   batch.set(ref, {
@@ -184,9 +178,14 @@ export const saveTreasuryCard = onCall(callableOptions, async (request) => {
   const caller = await requireAdminContext(request as CallableRequestLike)
   const parsed = treasuryCardSchema.safeParse(request.data)
   if (!parsed.success) throw new HttpsError('invalid-argument', parsed.error.issues[0]?.message || 'Check the card details.')
-  const { id, ...card } = parsed.data
+  const { id, ...rawCard } = parsed.data
+  const card = { ...rawCard, number: String(Number(rawCard.number)).padStart(2, '0') }
   if (!(await db.collection('treasuryEditions').doc(card.editionId).get()).exists) throw new HttpsError('not-found', 'Collection set not found.')
   const ref = id ? db.collection('treasuryCards').doc(id) : db.collection('treasuryCards').doc()
+  const editionCards = await db.collection('treasuryCards').where('editionId', '==', card.editionId).limit(200).get()
+  const numberConflict = editionCards.docs.some((document) => document.id !== ref.id
+    && String(Number(document.data().number)).padStart(2, '0') === card.number)
+  if (numberConflict) throw new HttpsError('already-exists', 'That card position is already used in this collection set.')
   const existing = await ref.get()
   await ref.set({
     ...card,
@@ -199,10 +198,11 @@ export const saveTreasuryCard = onCall(callableOptions, async (request) => {
 
 export const getTreasuryAdminState = onCall(callableOptions, async (request) => {
   await requireAdminContext(request as CallableRequestLike)
-  const [editionSnapshot, cardSnapshot, batchSnapshot] = await Promise.all([
+  const [editionSnapshot, cardSnapshot, batchSnapshot, transactionSnapshot] = await Promise.all([
     db.collection('treasuryEditions').limit(100).get(),
     db.collection('treasuryCards').limit(1000).get(),
     db.collection('_treasuryCodeBatches').orderBy('createdAt', 'desc').limit(100).get(),
+    db.collection('_treasuryTransactions').orderBy('createdAt', 'desc').limit(200).get(),
   ])
   return {
     editions: editionSnapshot.docs.map(publicEdition).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -215,92 +215,18 @@ export const getTreasuryAdminState = onCall(callableOptions, async (request) => 
         revokedCount: Number(data.revokedCount || 0), status: data.status, createdAt: asDate(data.createdAt),
       }
     }),
+    transactions: transactionSnapshot.docs.map((document) => ({ id: document.id, ...document.data(), createdAt: asDate(document.data().createdAt) })),
   }
 })
 
 export const generateTreasuryCodeBatch = onCall(callableOptions, async (request) => {
-  const caller = await requireAdminContext(request as CallableRequestLike)
-  const parsed = generateBatchSchema.safeParse(request.data)
-  if (!parsed.success) throw new HttpsError('invalid-argument', parsed.error.issues[0]?.message || 'Check the code batch details.')
-  await checkRateLimit(`treasury-generate:${caller.uid}`, 20, 60)
-  const cardRef = db.collection('treasuryCards').doc(parsed.data.cardId)
-  const cardSnapshot = await cardRef.get()
-  if (!cardSnapshot.exists) throw new HttpsError('not-found', 'Card not found.')
-  const card = adminCard(cardSnapshot)
-  const editionSnapshot = await db.collection('treasuryEditions').doc(card.editionId).get()
-  if (!editionSnapshot.exists) throw new HttpsError('failed-precondition', 'This card is not attached to a collection set.')
-  const batchRef = db.collection('_treasuryCodeBatches').doc()
-  const codes = new Set<string>()
-  while (codes.size < parsed.data.quantity) codes.add(generateTreasuryCode())
-  const write = db.batch()
-  const now = FieldValue.serverTimestamp()
-  write.create(batchRef, {
-    label: parsed.data.label, editionId: card.editionId, cardId: cardRef.id, orderId: parsed.data.orderId || '',
-    quantity: parsed.data.quantity, redeemedCount: 0, revokedCount: 0, status: 'active', createdAt: now, createdBy: caller.uid,
-  })
-  for (const code of codes) {
-    const normalized = normalizeTreasuryCode(code)!
-    const digest = hashTreasuryCode(normalized)
-    write.create(db.collection('_treasuryCodes').doc(digest), {
-      version: 1, batchId: batchRef.id, editionId: card.editionId, cardId: cardRef.id, status: 'active',
-      maskedSuffix: normalized.slice(-5), createdAt: now, createdBy: caller.uid,
-    })
-  }
-  try { await write.commit() } catch { throw new HttpsError('aborted', 'The code batch could not be created safely. Please try again.') }
-  return { batchId: batchRef.id, codes: [...codes] }
+  await requireAdminContext(request as CallableRequestLike)
+  throw new HttpsError('failed-precondition', 'Manual redemption keys have been retired. Assign the seven-character codes printed on the physical cards from the order page.')
 })
 
 export const redeemTreasuryCode = onCall(callableOptions, async (request) => {
-  const caller = await authorizeRequest(request as CallableRequestLike, { requireVerifiedEmail: true })
-  const parsed = redeemSchema.safeParse(request.data)
-  if (!parsed.success) throw new HttpsError('invalid-argument', 'Enter the complete code printed on your card.')
-  const normalized = normalizeTreasuryCode(parsed.data.code)
-  if (!normalized) throw new HttpsError('invalid-argument', 'That code could not be recognised. Check it and try again.')
-  const source = request.rawRequest.ip?.slice(0, 80) || 'unknown'
-  await Promise.all([
-    checkRateLimit(`treasury-redeem-user:${caller.uid}`, 12, 10),
-    checkRateLimit(`treasury-redeem-source:${source}`, 30, 10),
-  ])
-  const digest = hashTreasuryCode(normalized)
-  const codeRef = db.collection('_treasuryCodes').doc(digest)
-  const redemptionRef = db.collection('_treasuryRedemptions').doc(digest)
-  const result = await db.runTransaction(async (transaction) => {
-    const codeSnapshot = await transaction.get(codeRef)
-    const code = codeSnapshot.data()
-    if (!codeSnapshot.exists || !code || (code.status !== 'active' && !(code.status === 'redeemed' && code.redeemedBy === caller.uid))) {
-      throw new HttpsError('not-found', 'This code is not available. Check it carefully or contact us for help.')
-    }
-    const cardRef = db.collection('treasuryCards').doc(String(code.cardId || ''))
-    const editionRef = db.collection('treasuryEditions').doc(String(code.editionId || ''))
-    const holdingRef = db.collection('userTreasuries').doc(caller.uid).collection('cards').doc(cardRef.id)
-    const [cardSnapshot, editionSnapshot, holdingSnapshot] = await Promise.all([
-      transaction.get(cardRef), transaction.get(editionRef), transaction.get(holdingRef),
-    ])
-    if (!cardSnapshot.exists || !editionSnapshot.exists) throw new HttpsError('failed-precondition', 'This card is not available right now.')
-    const card = adminCard(cardSnapshot)
-    const edition = publicEdition(editionSnapshot)
-    if (code.status === 'redeemed' && code.redeemedBy === caller.uid) {
-      if (!holdingSnapshot.exists) throw new HttpsError('failed-precondition', 'Your collection needs attention. Please contact us.')
-      return { card, edition, holding: holdingSnapshot.data()!, newCard: false, retried: true }
-    }
-    const currentQuantity = holdingSnapshot.exists ? Math.max(1, Number(holdingSnapshot.data()?.quantity || 1)) : 0
-    const now = FieldValue.serverTimestamp()
-    const holding = {
-      editionId: editionRef.id, cardId: cardRef.id, quantity: currentQuantity + 1,
-      firstCollectedAt: holdingSnapshot.data()?.firstCollectedAt ?? now, lastCollectedAt: now,
-    }
-    transaction.set(holdingRef, holding)
-    transaction.set(db.collection('userTreasuries').doc(caller.uid), { updatedAt: now }, { merge: true })
-    transaction.update(codeRef, { status: 'redeemed', redeemedBy: caller.uid, redeemedAt: now })
-    transaction.create(redemptionRef, {
-      codeDigest: digest, batchId: code.batchId, editionId: editionRef.id, cardId: cardRef.id,
-      accountId: caller.uid, redeemedAt: now, writtenBy: 'server',
-    })
-    transaction.update(db.collection('_treasuryCodeBatches').doc(String(code.batchId)), { redeemedCount: FieldValue.increment(1) })
-    return { card, edition, holding, newCard: !holdingSnapshot.exists, retried: false }
-  })
-  const holding = { ...result.holding, firstCollectedAt: asDate(result.holding.firstCollectedAt), lastCollectedAt: new Date().toISOString() }
-  return { card: customerCard(result.card, holding), edition: result.edition, newCard: result.newCard, retried: result.retried }
+  await authorizeRequest(request as CallableRequestLike, { requireVerifiedEmail: true })
+  throw new HttpsError('failed-precondition', 'Single redemption keys have been retired. Open My Treasury, choose Redeem Cards, and enter your order number first.')
 })
 
 export const revokeTreasuryCodeBatch = onCall(callableOptions, async (request) => {

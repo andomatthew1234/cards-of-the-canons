@@ -4,7 +4,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, Navigate, NavLink, useLocation } from 'react-router-dom'
-import { useAuth } from '../../context/AuthContext'
+import { friendlyAuthError, useAuth } from '../../context/AuthContext'
 import { getCommunityAttentionCount } from '../../lib/community'
 import { maskEmail } from '../../lib/security'
 import { PageMeta } from '../PageMeta'
@@ -29,6 +29,8 @@ export function AccountCentreShell({ title, description, eyebrow, children, load
   const [mobileOpen, setMobileOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(() => accountDestinations.some((item) => pathBelongsTo(location.pathname, item)))
   const [communityAttention, setCommunityAttention] = useState(0)
+  const [signOutBusy, setSignOutBusy] = useState(false)
+  const [signOutError, setSignOutError] = useState('')
   const name = auth.user?.displayName || 'Collector'
   const isOverview = location.pathname === '/account'
   useEffect(() => setMobileOpen(false), [location.pathname])
@@ -44,6 +46,19 @@ export function AccountCentreShell({ title, description, eyebrow, children, load
     window.addEventListener('cards:community-updated', handleUpdate)
     return () => { active = false; window.removeEventListener('cards:community-updated', handleUpdate) }
   }, [auth.user])
+
+  async function signOut() {
+    if (signOutBusy) return
+    setSignOutBusy(true)
+    setSignOutError('')
+    try {
+      await auth.logOut()
+    } catch (error) {
+      setSignOutError(friendlyAuthError(error))
+    } finally {
+      setSignOutBusy(false)
+    }
+  }
 
   return <RequireAccount>
     <PageMeta title={title} description={description} />
@@ -70,7 +85,8 @@ export function AccountCentreShell({ title, description, eyebrow, children, load
         </nav>
         <div className="account-sidebar-footer">
           {auth.isAdmin && <Link to="/admin"><LayoutDashboard aria-hidden="true" /> Administrator workspace</Link>}
-          <button type="button" onClick={() => void auth.logOut()}><LogOut aria-hidden="true" /> Sign out</button>
+          <button type="button" disabled={signOutBusy} onClick={() => void signOut()}><LogOut aria-hidden="true" /> {signOutBusy ? 'Signing out…' : 'Sign out'}</button>
+          {signOutError && <p className="account-sidebar-error" role="alert">{signOutError}</p>}
         </div>
       </aside>
       <div className="account-centre-main">

@@ -44,13 +44,15 @@ service cloud.firestore {
         && (value.matches('^/images/[A-Za-z0-9._/-]+$')
             || value.matches('^https://firebasestorage\\.googleapis\\.com/[A-Za-z0-9?&=._~%/-]+$'));
     }
-    // Product documents cannot point at the page-image library. That separation
-    // is what makes reference-aware website-media deletion race-free: product
-    // writers can only select bundled images or objects under product-images.
+    // Product images may be bundled, uploaded directly for a product, or
+    // selected from the administrator's central Media Library. Other page
+    // image folders remain excluded. Media-library deletion also checks product
+    // references before removing an object.
     function validProductImageUrl(value) {
       return validUrl(value)
         && (value.matches('^/images/[A-Za-z0-9._/-]+$')
-            || value.matches('^https://firebasestorage\\.googleapis\\.com/.*/o/product-images%2F[A-Za-z0-9._%~-]+%2F[A-Za-z0-9._%~-]+\\?[A-Za-z0-9?&=._~%/-]+$'));
+            || value.matches('^https://firebasestorage\\.googleapis\\.com/.*/o/product-images%2F[A-Za-z0-9._%~-]+%2F[A-Za-z0-9._%~-]+\\?[A-Za-z0-9?&=._~%/-]+$')
+            || value.matches('^https://firebasestorage\\.googleapis\\.com/.*/o/page-images%2Flibrary%2F[A-Za-z0-9._%~-]+\\?[A-Za-z0-9?&=._~%/-]+$'));
     }
     // Strict slugs are enforced wherever a route or path segment is built from
     // stored data (products and articles), matching the build-time generator.
@@ -92,8 +94,8 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
     function validProduct(data) {
-      return data.keys().hasAll(['slug','name','shortDescription','description','priceCents','currency','imageUrl','imageAlt','category','featured','stock','status'])
-        && data.keys().hasOnly(['slug','name','shortDescription','description','priceCents','currency','imageUrl','imageAlt','category','featured','stock','status','createdAt','updatedAt'])
+      return data.keys().hasAll(['slug','name','shortDescription','description','priceCents','currency','imageUrl','imageAlt','category','featured','stock','treasuryCardsPerUnit','status'])
+        && data.keys().hasOnly(['slug','name','shortDescription','description','priceCents','currency','imageUrl','imageAlt','category','sortOrder','featured','stock','treasuryCardsPerUnit','status','createdAt','updatedAt'])
         && validSlug(data.slug)
         && data.name is string && data.name.size() >= 2 && data.name.size() <= 120
         && data.shortDescription is string && data.shortDescription.size() >= 2 && data.shortDescription.size() <= 300
@@ -102,7 +104,9 @@ service cloud.firestore {
         && data.currency == 'AUD' && validProductImageUrl(data.imageUrl)
         && data.imageAlt is string && data.imageAlt.size() <= 200
         && data.category is string && data.category.size() >= 2 && data.category.size() <= 80
+        && (!('sortOrder' in data) || (data.sortOrder is int && data.sortOrder >= 0 && data.sortOrder <= 10000))
         && data.featured is bool && (data.stock == null || (data.stock is int && data.stock >= 0 && data.stock <= 1000000))
+        && data.treasuryCardsPerUnit is int && data.treasuryCardsPerUnit >= 0 && data.treasuryCardsPerUnit <= 50
         && data.status in ['draft','published']
         && validOptionalTimestamp(data, 'createdAt') && validOptionalTimestamp(data, 'updatedAt');
     }
@@ -335,6 +339,37 @@ service cloud.firestore {
     match /websiteMediaLocks/{documentId} {
       allow read, write: if false; // Trusted reference/deletion coordination.
     }
+    match /legalPolicies/{policyId} {
+      // Public legal copy is readable only after the trusted publisher has
+      // marked the fixed Terms document live. All mutations use callable
+      // Functions so approval identity and publication timestamps stay
+      // server-owned.
+      allow get: if policyId == 'terms' && resource.data.status == 'published';
+      allow list, create, update, delete: if false;
+    }
+    match /legalPolicyDrafts/{policyId} {
+      allow read, write: if false; // Callable Terms editor only.
+    }
+    match /legalPolicyVersions/{versionId} {
+      allow read, write: if false; // Immutable callable-created history.
+    }
+    match /socialMediaLinks/{documentId} {
+      // The footer reads only the fixed, explicitly published document.
+      // Administrators edit through App Check-protected callable Functions so
+      // revision history and publisher identity remain server-owned.
+      // A fixed-document read must also succeed before the first publication;
+      // the client then receives "missing" instead of a noisy permission error.
+      // Direct writes are impossible and the trusted publisher is the only
+      // code path that can create this projection.
+      allow get: if documentId == 'published';
+      allow list, create, update, delete: if false;
+    }
+    match /socialMediaLinkDrafts/{documentId} {
+      allow read, write: if false; // Callable social-links editor only.
+    }
+    match /socialMediaLinkVersions/{versionId} {
+      allow read, write: if false; // Immutable callable-created history.
+    }
     match /enquiries/{enquiryId} {
       allow read, delete: if isAdmin();
       allow create: if false; // Trusted callable function only.
@@ -429,6 +464,15 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /_treasuryRedemptions/{redemptionId} {
+      allow read, write: if false;
+    }
+    match /_treasuryCardInstances/{instanceId} {
+      allow read, write: if false;
+    }
+    match /_treasuryTransactions/{transactionId} {
+      allow read, write: if false;
+    }
+    match /_treasuryOrderAttempts/{attemptId} {
       allow read, write: if false;
     }
     match /userTreasuries/{userId} {

@@ -20,9 +20,13 @@ const privateShell = await fs.readFile(path.join(dist, 'private.html'), 'utf8')
 requireText(privateShell, 'noindex,nofollow,noarchive', 'private.html')
 const notFound = await fs.readFile(path.join(dist, '404.html'), 'utf8')
 requireText(notFound, 'noindex,nofollow,noarchive', '404.html')
+const terms = await fs.readFile(path.join(dist, 'policies', 'terms', 'index.html'), 'utf8')
+requireText(terms, 'Terms and Conditions', 'policies/terms/index.html')
+requireText(terms, 'noindex,nofollow,noarchive', 'policies/terms/index.html')
 
 const sitemap = await fs.readFile(path.join(dist, 'sitemap.xml'), 'utf8')
 for (const forbidden of ['/account', '/admin', '/cart', '/checkout']) if (sitemap.includes(forbidden)) failures.push(`sitemap.xml: private path ${forbidden} must not appear`)
+if (sitemap.includes('/policies/terms')) failures.push('sitemap.xml: unpublished dynamic Terms page must not appear')
 requireText(await fs.readFile(path.join(dist, 'robots.txt'), 'utf8'), 'Sitemap:', 'robots.txt')
 
 // HTML/path safety over every generated document: no executable inline script,

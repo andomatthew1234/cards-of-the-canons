@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock3, FlaskConical, ShoppingBag, XCircle } from 'lucide-react'
+import { CheckCircle2, Clock3, FlaskConical, KeyRound, ShoppingBag, XCircle } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { PageMeta } from '../components/PageMeta'
@@ -70,7 +70,8 @@ export function CheckoutSuccess() {
       <h1>{title}</h1><p>{message}</p>
       {order && <div className="checkout-order-card"><div><span>Order</span><strong>#{order.id}</strong></div><div><span>Status</span><strong>{order.status.replace('_', ' ')}</strong></div><div><span>Total</span><strong>{formatMoney(order.totalCents, order.currency)}</strong></div></div>}
       {isTest && <div className="checkout-test-notice centred"><FlaskConical aria-hidden="true" /><span><strong>Test payment</strong>This is a test payment and will be marked as such.</span></div>}
-      <div className="checkout-result-actions"><Link className="button primary" to="/account/orders"><ShoppingBag /> View your orders</Link>{!paid && <Link className="button secondary" to="/cart">Return to cart</Link>}</div>
+      {paid && order?.paymentEnvironment === 'live' && <section className="checkout-treasury-instructions" aria-labelledby="checkout-treasury-title"><KeyRound aria-hidden="true" /><div><p className="eyebrow">Digital Treasury</p><h2 id="checkout-treasury-title">How to reveal your Saints</h2><p>Once your cards arrive, you can reveal your Saints in your Digital Treasury. Please wait for the physical cards—the unique codes are printed on them.</p><ol><li>Open your Account.</li><li>Navigate to My Treasury.</li><li>Click the glowing Redeem Cards button.</li><li>Enter this order number.</li><li>Enter the unique codes printed on your physical cards.</li><li>Reveal your Saints!</li></ol></div></section>}
+      <div className="checkout-result-actions"><Link className="button primary" to="/account/orders"><ShoppingBag /> View your orders</Link>{paid && !isTest && <Link className="button secondary" to="/account/treasury"><KeyRound /> My Treasury</Link>}{!paid && <Link className="button secondary" to="/cart">Return to cart</Link>}</div>
     </section>
   </>
 }

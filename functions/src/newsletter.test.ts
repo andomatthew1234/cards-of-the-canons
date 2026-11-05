@@ -13,6 +13,7 @@ import {
   resolveAccountJoinStatus,
   resolveSubscribeOutcome,
   statusOf,
+  subscriptionConfirmationMessage,
   subscriberIdForEmail,
   unsubscribeTokenHorizon,
 } from './newsletter'
@@ -103,7 +104,7 @@ describe('consent state invariants', () => {
     }
   })
 
-  it('treats only an explicitly confirmed subscriber as mailable', () => {
+  it('treats only an explicitly consented active subscriber as mailable', () => {
     expect(isMailable('subscribed')).toBe(true)
     expect(isMailable('pending')).toBe(false)
     expect(isMailable('unsubscribed')).toBe(false)
@@ -112,8 +113,8 @@ describe('consent state invariants', () => {
   })
 
   it('lets an existing unsubscribe suppression win over a new signup', () => {
-    expect(resolveSubscribeOutcome(undefined)).toEqual({ status: 'pending', issueToken: true })
-    expect(resolveSubscribeOutcome({ status: 'pending' })).toEqual({ status: 'pending', issueToken: true })
+    expect(resolveSubscribeOutcome(undefined)).toEqual({ status: 'subscribed', issueToken: true })
+    expect(resolveSubscribeOutcome({ status: 'pending' })).toEqual({ status: 'subscribed', issueToken: true })
     expect(resolveSubscribeOutcome({ status: 'subscribed' })).toEqual({ status: 'subscribed', issueToken: false })
     expect(resolveSubscribeOutcome({ status: 'unsubscribed' })).toEqual({ status: 'unsubscribed', issueToken: false })
     // Corrupted or unknown stored state fails closed instead of re-subscribing.
@@ -121,11 +122,24 @@ describe('consent state invariants', () => {
     expect(resolveSubscribeOutcome({})).toEqual({ status: 'unsubscribed', issueToken: false })
   })
 
-  it('activates authenticated account consent only when the account email is verified', () => {
-    expect(resolveAccountJoinStatus(undefined, false)).toBe('pending')
-    expect(resolveAccountJoinStatus({ status: 'unsubscribed' }, false)).toBe('pending')
+  it('activates authenticated account consent without requiring a second confirmation', () => {
+    expect(resolveAccountJoinStatus(undefined, false)).toBe('subscribed')
+    expect(resolveAccountJoinStatus({ status: 'unsubscribed' }, false)).toBe('subscribed')
     expect(resolveAccountJoinStatus({ status: 'unsubscribed' }, true)).toBe('subscribed')
     expect(resolveAccountJoinStatus({ status: 'subscribed' }, false)).toBe('subscribed')
+  })
+
+  it('builds an informational subscription email with unsubscribe, not activation', () => {
+    const message = subscriptionConfirmationMessage(
+      'jane@example.com',
+      'unsubscribe-token',
+      'https://doxatreasury.com/',
+    )
+
+    expect(message.subject).toBe('You’re subscribed to Doxa updates')
+    expect(message.text).toContain('No further confirmation is required.')
+    expect(message.text).toContain('https://doxatreasury.com/newsletter/unsubscribe?token=unsubscribe-token')
+    expect(message.text).not.toContain('/newsletter/confirm')
   })
 
   it('recognises only the three stored statuses', () => {

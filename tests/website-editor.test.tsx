@@ -79,6 +79,9 @@ describe("Website Editor workspace", () => {
       .mockReset()
       .mockResolvedValue([]);
     vi.mocked(editorApi.listWebsiteMedia).mockReset().mockResolvedValue([]);
+    vi.mocked(editorApi.uploadWebsiteMedia)
+      .mockReset()
+      .mockResolvedValue("https://firebasestorage.googleapis.com/v0/b/example.appspot.com/o/page-images%2Flibrary%2Ffront-card.webp?alt=media&token=test");
     vi.mocked(editorApi.saveWebsiteContentDraft)
       .mockReset()
       .mockResolvedValue({ revision: 2, basedOnPublishedRevision: 1 });
@@ -167,6 +170,37 @@ describe("Website Editor workspace", () => {
       library.resolve([]);
       await Promise.resolve();
     });
+  });
+
+  it("uploads an image to Media Library without asking for a URL slug and refreshes the library", async () => {
+    const uploadedItem = {
+      path: "page-images/library/1790000000000-a1b2c3d4-front-card.webp",
+      size: 2048,
+      contentType: "image/webp",
+      createdAt: "2026-10-29T00:00:00.000Z",
+      updatedAt: "2026-10-29T00:00:00.000Z",
+      generation: "1",
+      referenced: false,
+      references: [],
+      deletionAvailable: true,
+      url: "https://firebasestorage.googleapis.com/v0/b/example.appspot.com/o/page-images%2Flibrary%2Ffront-card.webp?alt=media&token=test",
+    };
+    vi.mocked(editorApi.listWebsiteMedia)
+      .mockReset()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([uploadedItem]);
+
+    renderEditor();
+    expect(await screen.findByRole("heading", { name: "What would you like to edit?" })).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: "Media library" })[0]);
+
+    const image = new File(["image bytes"], "front-card.webp", { type: "image/webp" });
+    await userEvent.upload(screen.getByLabelText(/Upload an image/), image);
+
+    await waitFor(() => expect(editorApi.uploadWebsiteMedia).toHaveBeenCalledWith(image));
+    await waitFor(() => expect(editorApi.listWebsiteMedia).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("1790000000000-a1b2c3d4-front-card.webp")).toBeInTheDocument();
+    expect(screen.queryByText(/URL slug/i)).not.toBeInTheDocument();
   });
 
   it("shows the publishing checkpoints, records the release and reloads after continuing", async () => {

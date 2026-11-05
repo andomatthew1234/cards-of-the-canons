@@ -11,7 +11,7 @@ describe('public form validation', () => {
   it('normalises newsletter signup and refuses a client-chosen status', () => {
     const result = newsletterSchema.safeParse({ email: ' JANE@EXAMPLE.COM ', consent: true, source: 'home' })
     expect(result.success && result.data.email).toBe('jane@example.com')
-    // Status is decided by the server's double opt-in flow, never the client.
+    // Status is decided by the server's consent flow, never the client.
     expect(newsletterSchema.safeParse({ email: 'jane@example.com', consent: true, source: 'home', status: 'subscribed' }).success).toBe(false)
   })
 
@@ -37,11 +37,11 @@ describe('public form validation', () => {
   })
   it('allows only explicit account administration actions', () => {
     expect(accountAdminActionSchema.safeParse({ uid: 'customer-1', action: 'disable' }).success).toBe(true)
+    expect(accountAdminActionSchema.safeParse({ uid: 'customer-1', action: 'grantAdmin' }).success).toBe(true)
     expect(accountAdminActionSchema.safeParse({ uid: 'customer-1', action: 'revokeAdmin' }).success).toBe(true)
     expect(accountAdminActionSchema.safeParse({ uid: 'customer-1', action: 'setPassword', password: 'secret' }).success).toBe(false)
     // Promotion is never a client-reachable action: provisioning is either an
     // operator-owned migration or the explicitly configured UID allowlist.
-    expect(accountAdminActionSchema.safeParse({ uid: 'customer-1', action: 'grantAdmin' }).success).toBe(false)
   })
 
   it('bounds UID-based provisioning allowlists', () => {
