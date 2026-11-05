@@ -59,10 +59,20 @@ describe("LegalPolicyPage", () => {
     expect(screen.getByTestId("page-meta")).toHaveAttribute("data-no-index", "false");
   });
 
-  it("fails closed when Terms and Conditions have not been published", async () => {
+  it("uses the client-approved bundled Terms when no administrator version is published", async () => {
     getPublishedTermsPolicy.mockResolvedValue(null);
     render(<MemoryRouter><LegalPolicyPage slug="terms" /></MemoryRouter>);
-    expect(await screen.findByRole("heading", { level: 1, name: "This policy is not published." })).toBeInTheDocument();
-    expect(screen.getByTestId("page-meta")).toHaveAttribute("data-no-index", "true");
+    expect(await screen.findByRole("heading", { level: 1, name: "Website Terms and Conditions of Use" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "1. About the Website" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "18. Entire Agreement, Variation and Waiver" })).toBeInTheDocument();
+    expect(screen.getByText(/ABN 57 919 748 380/)).toBeInTheDocument();
+    expect(screen.getByTestId("page-meta")).toHaveAttribute("data-no-index", "false");
+  });
+
+  it("uses the approved Terms if the policy service is temporarily unavailable", async () => {
+    getPublishedTermsPolicy.mockRejectedValue(new Error("offline"));
+    render(<MemoryRouter><LegalPolicyPage slug="terms" /></MemoryRouter>);
+    expect(await screen.findByRole("heading", { level: 1, name: "Website Terms and Conditions of Use" })).toBeInTheDocument();
+    expect(screen.getByText("These Terms are effective as of 5 November 2026.")).toBeInTheDocument();
   });
 });

@@ -7,6 +7,7 @@ import { useUnsavedChanges } from '../../admin/utils'
 import { MarkdownContent } from '../../components/MarkdownContent'
 import { PageMeta } from '../../components/PageMeta'
 import { friendlyAuthError } from '../../context/AuthContext'
+import { APPROVED_TERMS_POLICY } from '../../legal/approvedTerms'
 import { getTermsPolicyEditorState, publishTermsPolicy, saveTermsPolicyDraft } from '../../lib/data'
 import type { TermsPolicyContent, TermsPolicyDocument } from '../../types'
 
@@ -37,7 +38,12 @@ export function TermsSettingsPage() {
     setError('')
     try {
       const state = await getTermsPolicyEditorState()
-      const next = contentOf(state.draft)
+      const shouldUseApprovedBaseline = state.draft.revision === 0
+        && !state.published
+        && !state.draft.bodyMarkdown.trim()
+      const next = shouldUseApprovedBaseline
+        ? contentOf(APPROVED_TERMS_POLICY)
+        : contentOf(state.draft)
       setContent(next)
       setRevision(state.draft.revision)
       setPublished(state.published)
@@ -134,7 +140,7 @@ export function TermsSettingsPage() {
           <div className="admin-form-stack">
             <div className="admin-publish-summary">
               <StatusBadge tone={published ? 'positive' : 'warning'}>{published ? 'Published' : 'Not published'}</StatusBadge>
-              <p>{published ? `Version ${published.version} is live. Draft revision ${revision} remains private until you publish again.` : 'The footer link is available, but visitors see an unavailable notice until approved wording is published.'}</p>
+              <p>{published ? `Version ${published.version} is live. Draft revision ${revision} remains private until you publish again.` : 'The approved baseline is live. Publishing here replaces it with your recorded administrator version.'}</p>
             </div>
             <div className="admin-security-note"><FileText /><p>Saving a draft never changes the public policy. Publishing is a separate, recorded administrator action.</p></div>
           </div>

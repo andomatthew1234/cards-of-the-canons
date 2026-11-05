@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { MarkdownContent } from "../components/MarkdownContent";
 import { PageMeta } from "../components/PageMeta";
 import { getPublishedTermsPolicy } from "../lib/data";
+import { APPROVED_TERMS_POLICY } from "../legal/approvedTerms";
 import type { TermsPolicyDocument } from "../types";
 import {
   getPublishedLegalPolicy,
@@ -20,8 +21,12 @@ export function LegalPolicyPage({ slug }: { slug: LegalPolicySlug }) {
     let active = true;
     setTermsPolicy(undefined);
     void getPublishedTermsPolicy()
-      .then((policy) => { if (active) setTermsPolicy(policy); })
-      .catch(() => { if (active) setTermsPolicy(null); });
+      .then((policy) => {
+        if (active) setTermsPolicy(policy ?? APPROVED_TERMS_POLICY);
+      })
+      .catch(() => {
+        if (active) setTermsPolicy(APPROVED_TERMS_POLICY);
+      });
     return () => { active = false; };
   }, [slug]);
 
