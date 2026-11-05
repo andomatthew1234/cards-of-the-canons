@@ -9,15 +9,17 @@ describe('public footer link visibility', () => {
     expect(layout).toContain('className="footer-abn"')
   })
 
-  it('keeps Socials, Legal and Contact in one responsive three-column row', () => {
+  it('keeps Links, Socials, Legal and Contact as evenly spaced desktop columns', () => {
     const layout = readFileSync('src/components/Layout.tsx', 'utf8')
     const styles = readFileSync('src/styles.css', 'utf8')
-    const supportColumns = layout.slice(layout.indexOf('className="footer-support-columns"'))
 
-    expect(supportColumns.indexOf('footer-social-links')).toBeLessThan(supportColumns.indexOf('footer-legal-links'))
-    expect(supportColumns.indexOf('footer-legal-links')).toBeLessThan(supportColumns.indexOf('className="footer-contact"'))
-    expect(styles).toMatch(/\.footer-support-columns\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/s)
-    expect(styles).toMatch(/@media \(max-width: 600px\)[\s\S]*?\.footer-support-columns\s*\{[^}]*grid-template-columns:\s*1fr/s)
+    expect(layout.indexOf('className="footer-navigation"')).toBeLessThan(layout.indexOf('footer-social-links'))
+    expect(layout.indexOf('footer-social-links')).toBeLessThan(layout.indexOf('footer-legal-links'))
+    expect(layout.indexOf('footer-legal-links')).toBeLessThan(layout.indexOf('className="footer-contact"'))
+    expect(layout).toContain('>T&amp;C’s</Link>')
+    expect(layout).toContain('to={legalPolicyPath("privacy")}>Privacy</Link>')
+    expect(styles).toMatch(/\.editorial-footer\s*\{[^}]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\)/s)
+    expect(styles).toMatch(/@media \(max-width: 600px\)[\s\S]*?\.editorial-footer\s*\{[^}]*grid-template-columns:\s*1fr/s)
   })
   it.each(['', '#', '/', '/home', 'http://instagram.com/doxa', 'https://instagram.com/', 'https://example.com/doxa', 'https://x.com/coming-soon'])(
     'hides an unfinished social destination: %s',

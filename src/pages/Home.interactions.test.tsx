@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { CartProvider } from '../context/CartContext'
 import { demoProducts } from '../data/demo'
-import { HomeIntroductionBody, HomeProductCarousel, InformationGrid, missionTitleLines, ParallaxFigure } from './Home'
+import { HomeIntroductionBody, HomeProductCarousel, InformationGrid, missionTitleLines, twoEditorialVerseLines, ParallaxFigure } from './Home'
 
 describe('homepage history copy', () => {
   it('renders bold and italic formatting instead of exposing markdown markers', () => {
@@ -15,6 +15,13 @@ describe('homepage history copy', () => {
     expect(container.querySelector('em')).toHaveTextContent('collected')
     expect(container).not.toHaveTextContent('**carefully made**')
     expect(container).not.toHaveTextContent('*collected*')
+  })
+
+  it('condenses a manually broken How It Began Psalm into two editorial lines without losing wording', () => {
+    const lines = twoEditorialVerseLines('One *thing* I have desired of the Lord,\nThat will I seek:\nThat I may dwell in the house of the Lord\nAll the days of my life,\nTo behold the beauty of the Lord,\nAnd to inquire in His temple.')
+
+    expect(lines).toHaveLength(2)
+    expect(lines.join(' ')).toBe('One *thing* I have desired of the Lord, That will I seek: That I may dwell in the house of the Lord All the days of my life, To behold the beauty of the Lord, And to inquire in His temple.')
   })
 })
 

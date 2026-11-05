@@ -11,9 +11,17 @@ export const HOME_PRODUCT_SLUGS = [
   'church-history-bookmarks',
 ] as const
 
-export function orderHomeProducts(products: Product[]) {
+/**
+ * A stored list is an editor-owned merchandising choice. When it is absent,
+ * retain the established collection order for existing published websites.
+ */
+export function orderHomeProducts(products: Product[], productSlugs?: readonly string[]) {
   const bySlug = new Map(products.map((product) => [product.slug, product]))
-  return HOME_PRODUCT_SLUGS.flatMap((slug) => {
+  const selectedSlugs = productSlugs ?? HOME_PRODUCT_SLUGS
+  const seen = new Set<string>()
+  return selectedSlugs.flatMap((slug) => {
+    if (seen.has(slug)) return []
+    seen.add(slug)
     const product = bySlug.get(slug)
     return product ? [product] : []
   })

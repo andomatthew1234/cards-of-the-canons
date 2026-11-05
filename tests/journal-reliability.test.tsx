@@ -166,6 +166,24 @@ describe('public Journal reliability', () => {
     expect(dataApi.listPublishedJournalArticles).toHaveBeenNthCalledWith(2, 'article-first')
   })
 
+  it('filters the complete archive by editable Journal category and keeps the choice in the URL', async () => {
+    const progress = article('article-progress', 'A progress update')
+    const reflection = { ...article('article-reflection', 'A considered reflection'), category: 'Reflection' }
+    const olderReflection = { ...article('article-older-reflection', 'An older reflection'), category: 'Reflection' }
+    vi.mocked(dataApi.listPublishedJournalArticles)
+      .mockResolvedValueOnce({ articles: [progress, reflection], nextCursor: 'article-reflection' })
+      .mockResolvedValueOnce({ articles: [olderReflection], nextCursor: null })
+    render(<MemoryRouter initialEntries={['/journal']}><Journal /><LocationProbe /></MemoryRouter>)
+
+    expect(await screen.findByText('A progress update')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Reflection' }))
+
+    expect(await screen.findByText('An older reflection')).toBeInTheDocument()
+    expect(screen.queryByText('A progress update')).not.toBeInTheDocument()
+    expect(screen.getByTestId('location')).toHaveTextContent('/journal?category=Reflection')
+    expect(screen.getByRole('button', { name: 'Reflection' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
   it('opens an article through a direct slug lookup rather than an archive page', async () => {
     vi.mocked(dataApi.getPublishedJournalArticle).mockResolvedValue(article('article-older', 'Older story'))
     render(<MemoryRouter initialEntries={['/journal/older-story']}><Routes><Route path="/journal/:slug" element={<JournalArticle />} /></Routes></MemoryRouter>)

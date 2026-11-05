@@ -376,7 +376,9 @@
 .home-information-arrow:disabled { cursor: default; }
 .home-product-arrow.previous { left: -23px; }
 .home-product-arrow.next { right: -23px; }
-.home-product-page { display: block; margin-top: .7rem; color: #795d4e; font-size: .62rem; letter-spacing: .08em; text-align: center; }
+/* Duplicate edge slides make the native track genuinely wrap without exposing
+   a second, focusable copy of a product while it is being normalised. */
+.home-carousel-clone { pointer-events: none; }
 
 .home-information.home-stage {
   min-height: min(760px, 86svh);
@@ -677,7 +679,7 @@
   display: grid;
   gap: .35rem;
   width: calc(100% + (2 * clamp(2.25rem, 4vw, 4rem)));
-  min-height: clamp(7rem, 10vw, 8.75rem);
+  min-height: clamp(5.75rem, 8vw, 7rem);
   max-width: none;
   margin: clamp(.8rem, 1.4vw, 1.1rem) calc(-1 * clamp(2.25rem, 4vw, 4rem)) 0;
   padding: clamp(.7rem, 1.3vw, 1rem) clamp(2.25rem, 4vw, 4rem);
@@ -695,12 +697,12 @@
 
 .home-genesis-verse-lines {
   display: grid;
-  gap: .05rem;
+  gap: .3rem;
 }
 
 .home-genesis-verse-lines p {
   margin: 0;
-  font: italic clamp(.76rem, .88vw, .88rem)/1.35 var(--serif);
+  font: italic clamp(.76rem, .88vw, .88rem)/1.4 var(--serif);
 }
 
 .home-shell .home-genesis-chapter .home-editorial-media,
@@ -986,7 +988,7 @@
 }
 
 @media (max-height: 740px) {
-  .home-shell .home-mission-centre { padding-block: .85rem; }
+  .home-shell .home-mission-centre { padding-block: .95rem; }
   .home-shell .home-mission-heading h2 {
     margin-block: .45rem;
     font-size: clamp(1.65rem, 6vw, 2.6rem);
@@ -1001,14 +1003,14 @@
     padding: .58rem .85rem;
   }
   .home-shell .home-mission-verse {
-    gap: .55rem;
-    margin-top: .7rem;
-    padding-top: .6rem;
+    gap: .7rem;
+    margin-top: 1rem;
+    padding-top: .9rem;
   }
   .home-shell .home-mission-verse > span { display: none; }
   .home-shell .home-mission-verse blockquote {
     font-size: clamp(.74rem, 1vw, .88rem);
-    line-height: 1.42;
+    line-height: 1.55;
   }
   .home-shell .home-mission-verse cite {
     padding-top: .2rem;
@@ -1098,6 +1100,37 @@
   color: #795f4d;
   font-size: .72rem;
   letter-spacing: .04em;
+}
+.journal-category-filters {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .45rem;
+  width: min(100%, 780px);
+}
+.journal-category-filters button {
+  min-height: 2.35rem;
+  border: 1px solid rgba(83, 0, 0, .18);
+  border-radius: 999px;
+  padding: .5rem .85rem;
+  background: rgba(255, 253, 247, .72);
+  color: #583a2a;
+  cursor: pointer;
+  font: 700 .7rem/1.1 var(--sans);
+  letter-spacing: .035em;
+  transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+}
+.journal-category-filters button:hover,
+.journal-category-filters button:focus-visible {
+  border-color: #a46a22;
+  background: #fffdf7;
+  color: #530000;
+  transform: translateY(-1px);
+}
+.journal-category-filters button[aria-pressed="true"] {
+  border-color: #530000;
+  background: #530000;
+  color: #fcf5de;
 }
 .journal-index > .home-reveal { width: min(100%, 1220px); margin-inline: auto; }
 .journal-card {
@@ -1232,6 +1265,7 @@
   .journal-card-image img { clip-path: inset(18% 0); }
   .journal-card.is-scroll-focused .journal-card-image img { clip-path: inset(0); }
   .journal-card h2 { font-size: clamp(2.4rem, 11vw, 3.6rem); }
+  .journal-category-filters { justify-content: flex-start; }
   .journal-pagination {
     grid-template-columns: 1fr 1fr;
   }
@@ -1249,7 +1283,8 @@
   .journal-card-image img { clip-path: inset(0); transition: none; }
   .journal-card-image:hover img { transform: none; }
   .journal-loading span { animation: none; border-color: #8b4d18; }
-  .journal-pagination button { transition: none; }
+  .journal-pagination button,
+  .journal-category-filters button { transition: none; }
 }
 
 /* Admin preview isolation lives here because this stylesheet is the final cascade. */

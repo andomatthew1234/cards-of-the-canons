@@ -55,7 +55,6 @@ describe('contact enquiry form', () => {
     expect(screen.queryByLabelText(/Organisation/)).not.toBeInTheDocument()
 
     await user.type(screen.getByLabelText(/How can we help/i), 'Please tell me when the first collection is available.')
-    await user.click(screen.getByLabelText(/I agree to my details/))
     await user.click(screen.getByRole('button', { name: 'Send enquiry' }))
 
     await waitFor(() => expect(saveEnquiry).toHaveBeenCalledWith({
@@ -86,7 +85,7 @@ describe('contact enquiry form', () => {
     expect(screen.getByRole('button', { name: 'Use my account details instead' })).toBeInTheDocument()
   })
 
-  it('records a consented general enquiry and confirms storage without claiming an email was sent', async () => {
+  it('records the service-only consent implied by sending a general enquiry and confirms storage without claiming an email was sent', async () => {
     saveEnquiry.mockResolvedValue({ demo: false })
     const user = userEvent.setup()
     renderContact()
@@ -94,7 +93,6 @@ describe('contact enquiry form', () => {
     await user.type(screen.getByLabelText('Full name'), 'Ada Example')
     await user.type(screen.getByLabelText('Email address'), 'ADA@EXAMPLE.COM')
     await user.type(screen.getByLabelText(/How can we help/i), 'Please tell me when the first collection is available.')
-    await user.click(screen.getByLabelText(/I agree to my details/))
     await user.click(screen.getByRole('button', { name: 'Send enquiry' }))
 
     await waitFor(() => expect(saveEnquiry).toHaveBeenCalledWith({
@@ -117,7 +115,6 @@ describe('contact enquiry form', () => {
     await user.type(screen.getByLabelText('Full name'), 'Ada Example')
     await user.type(screen.getByLabelText('Email address'), 'ada@example.com')
     await user.type(screen.getByLabelText(/How can we help/i), 'This message is long enough to submit.')
-    await user.click(screen.getByLabelText(/I agree to my details/))
     await user.click(screen.getByRole('button', { name: 'Send enquiry' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Too many enquiries')
@@ -131,7 +128,6 @@ describe('contact enquiry form', () => {
     await user.type(screen.getByLabelText('Full name'), 'Ada Example')
     await user.type(screen.getByLabelText('Email address'), 'ada@example.com')
     await user.type(screen.getByLabelText(/How can we help/i), 'This message is long enough to submit.')
-    await user.click(screen.getByLabelText(/I agree to my details/))
     await user.click(screen.getByRole('button', { name: 'Send enquiry' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('not available in this local environment')

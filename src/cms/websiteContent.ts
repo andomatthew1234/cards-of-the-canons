@@ -205,7 +205,13 @@ export interface WebsiteContent {
             imageAlt: string;
           }>;
         };
-        featured: { eyebrow: string; title: string; body: string };
+        featured: {
+          eyebrow: string;
+          title: string;
+          body: string;
+          /** Explicit homepage merchandising order; absence retains the established order. */
+          productSlugs?: string[];
+        };
         story: {
           eyebrow: string;
           title: string;
@@ -635,6 +641,9 @@ export const websiteContentSchema: z.ZodType<WebsiteContent> = z
                     eyebrow: text(80),
                     title: text(160),
                     body: text(1000),
+                    // Product records remain authoritative. This only determines
+                    // which existing published products are featured and in what order.
+                    productSlugs: z.array(text(120, 2)).max(24).optional(),
                   })
                   .strict(),
                 story: z

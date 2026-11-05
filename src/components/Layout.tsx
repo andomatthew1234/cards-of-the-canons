@@ -441,7 +441,6 @@ export function Layout({
           </div>
         ))}
         </div>
-        <div className="footer-support-columns">
         {visibleSocialLinks.length > 0 && <div className="footer-link-group footer-social-links">
             <h2>{socialMedia?.heading || "Follow"}</h2>
             {visibleSocialLinks.map((item) => {
@@ -454,8 +453,9 @@ export function Layout({
         </div>}
         <div className="footer-link-group footer-legal-links">
             <h2>Legal</h2>
-            <Link to={legalPolicyPath("terms")}>Terms and Conditions</Link>
-            {publishedLegalPolicies.filter((policy) => policy.slug !== "terms").map((policy) => (
+            <Link to={legalPolicyPath("terms")}>T&amp;C’s</Link>
+            <Link to={legalPolicyPath("privacy")}>Privacy</Link>
+            {publishedLegalPolicies.filter((policy) => policy.slug !== "terms" && policy.slug !== "privacy").map((policy) => (
               <Link key={policy.slug} to={legalPolicyPath(policy.slug)}>
                 {policy.navigationLabel}
               </Link>
@@ -466,7 +466,6 @@ export function Layout({
           <p>Open to private or business enquiries</p>
           <Link className="footer-contact-button" to="/contact">Contact us <ArrowRight aria-hidden="true" /></Link>
           <a className="footer-contact-email" href={`mailto:${website?.branding.publicContactEmail ?? "info@doxatreasury.com"}`}>{website?.branding.publicContactEmail ?? "info@doxatreasury.com"}</a>
-        </div>
         </div>
         <p className="footer-note">
           © {new Date().getFullYear()} {footer.brandName}.{" "}

@@ -12,6 +12,7 @@ describe('contact page experience', () => {
     expect(screen.getByRole('textbox', { name: 'Full name' })).toBeRequired()
     expect(screen.getByRole('textbox', { name: 'Email address' })).toBeRequired()
     expect(screen.getByRole('textbox', { name: /How can we help/i })).toBeRequired()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Send enquiry/i })).toBeEnabled()
   })
 })

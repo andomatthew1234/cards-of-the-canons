@@ -109,16 +109,22 @@ export function Journal() {
   const requestedPage = rawPage && /^[1-9]\d*$/.test(rawPage) ? Math.min(9999, Number(rawPage)) : 1
   const search = searchParams.get('q') ?? ''
   const searchQuery = search.trim().toLocaleLowerCase()
-  const searchingArchive = Boolean(searchQuery && nextCursor && !error)
+  const requestedCategory = searchParams.get('category')?.trim() ?? ''
+  const categories = useMemo(() => [...new Set(entries.map((entry) => entry.category.trim()).filter(Boolean))].sort((first, second) => first.localeCompare(second)), [entries])
+  const selectedCategory = categories.includes(requestedCategory) ? requestedCategory : ''
+  const filteringArchive = Boolean((searchQuery || selectedCategory) && nextCursor && !error)
   const matchingEntries = useMemo(() => {
-    if (!searchQuery) return entries
-    return entries.filter((entry) => `${entry.title} ${entry.excerpt} ${entry.category} ${entry.authorName} ${entry.slug} ${entry.seoTitle} ${entry.seoDescription} ${entry.bodyMarkdown}`.toLocaleLowerCase().includes(searchQuery))
-  }, [entries, searchQuery])
+    return entries.filter((entry) => {
+      const matchesSearch = !searchQuery || `${entry.title} ${entry.excerpt} ${entry.category} ${entry.authorName} ${entry.slug} ${entry.seoTitle} ${entry.seoDescription} ${entry.bodyMarkdown}`.toLocaleLowerCase().includes(searchQuery)
+      return matchesSearch && (!selectedCategory || entry.category.trim() === selectedCategory)
+    })
+  }, [entries, searchQuery, selectedCategory])
   const knownNormalPages = Math.max(1, totalCount === null ? pagesLoaded + (nextCursor ? 1 : 0) : Math.ceil(totalCount / JOURNAL_PAGE_SIZE))
-  const totalPages = searchQuery ? Math.max(1, Math.ceil(matchingEntries.length / JOURNAL_PAGE_SIZE)) : knownNormalPages
+  const hasActiveFilter = Boolean(searchQuery || selectedCategory)
+  const totalPages = hasActiveFilter ? Math.max(1, Math.ceil(matchingEntries.length / JOURNAL_PAGE_SIZE)) : knownNormalPages
   const pageStart = (requestedPage - 1) * JOURNAL_PAGE_SIZE
   const visibleEntries = matchingEntries.slice(pageStart, pageStart + JOURNAL_PAGE_SIZE)
-  const awaitingRequestedPage = !searchQuery && requestedPage > pagesLoaded && Boolean(nextCursor)
+  const awaitingRequestedPage = !hasActiveFilter && requestedPage > pagesLoaded && Boolean(nextCursor)
 
   const setPage = useCallback((page: number, replace = false) => {
     const next = new URLSearchParams(searchParams)
@@ -136,10 +142,18 @@ export function Journal() {
     setSearchParams(next, { replace: true })
   }
 
+  const setCategory = (category: string) => {
+    const next = new URLSearchParams(searchParams)
+    if (category) next.set('category', category)
+    else next.delete('category')
+    next.delete('page')
+    setSearchParams(next, { replace: true })
+  }
+
   useEffect(() => {
-    if (!searchQuery || !nextCursor || loading || loadingMore || error) return
+    if (!hasActiveFilter || !nextCursor || loading || loadingMore || error) return
     void load(nextCursor)
-  }, [error, load, loading, loadingMore, nextCursor, searchQuery])
+  }, [error, hasActiveFilter, load, loading, loadingMore, nextCursor])
 
   useEffect(() => {
     if (!rawPage || (/^[1-9]\d*$/.test(rawPage) && Number(rawPage) <= 9999)) return
@@ -147,21 +161,21 @@ export function Journal() {
   }, [rawPage, setPage])
 
   useEffect(() => {
-    if (searchQuery || loading || loadingMore || error || pagesLoaded === 0) return
+    if (hasActiveFilter || loading || loadingMore || error || pagesLoaded === 0) return
     if (totalCount !== null && requestedPage > knownNormalPages) {
       setPage(knownNormalPages, true)
       return
     }
     if (requestedPage > pagesLoaded && nextCursor) void load(nextCursor)
-  }, [error, knownNormalPages, load, loading, loadingMore, nextCursor, pagesLoaded, requestedPage, searchQuery, setPage, totalCount])
+  }, [error, hasActiveFilter, knownNormalPages, load, loading, loadingMore, nextCursor, pagesLoaded, requestedPage, setPage, totalCount])
 
   useEffect(() => {
-    if (!searchQuery || searchingArchive || loading || loadingMore || error) return
+    if (!hasActiveFilter || filteringArchive || loading || loadingMore || error) return
     if (requestedPage > totalPages) setPage(totalPages, true)
-  }, [error, loading, loadingMore, requestedPage, searchQuery, searchingArchive, setPage, totalPages])
+  }, [error, filteringArchive, hasActiveFilter, loading, loadingMore, requestedPage, setPage, totalPages])
 
-  const pageStatus = searchQuery
-    ? searchingArchive
+  const pageStatus = hasActiveFilter
+    ? filteringArchive
       ? `Searching the complete Journal… ${matchingEntries.length} ${matchingEntries.length === 1 ? 'match' : 'matches'} so far`
       : `${matchingEntries.length} ${matchingEntries.length === 1 ? 'story' : 'stories'} found · Page ${requestedPage} of ${totalPages}`
     : totalCount === null
@@ -174,16 +188,20 @@ export function Journal() {
     <section className="journal-index" aria-label="Journal entries" aria-busy={loading || loadingMore}>
       <div className="journal-search-tools" role="search">
         <label className="journal-search"><Search aria-hidden="true" /><span className="sr-only">Search the Journal</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search the Journal" autoComplete="off" /></label>
+        {categories.length > 1 && <div className="journal-category-filters" aria-label="Filter Journal by category">
+          <button type="button" aria-pressed={!selectedCategory} onClick={() => setCategory('')}>All stories</button>
+          {categories.map((category) => <button type="button" key={category} aria-pressed={selectedCategory === category} onClick={() => setCategory(category)}>{category}</button>)}
+        </div>}
         <p className="journal-search-status" aria-live="polite">{pageStatus}</p>
       </div>
       {loading && <div className="journal-loading" role="status"><span aria-hidden="true" />Opening the Journal…</div>}
       {!loading && error && <div className="journal-notice" role="alert"><p>{error}</p><button className="text-button" onClick={() => void load(nextCursor)}><RefreshCw /> Try again</button></div>}
       {!loading && !error && entries.length === 0 && <div className="journal-notice journal-empty"><BookOpen aria-hidden="true" /><p>No Journal stories have been published yet.</p><p>Please check back soon.</p></div>}
-      {!loading && !error && entries.length > 0 && matchingEntries.length === 0 && !searchingArchive && <div className="journal-notice journal-empty"><Search aria-hidden="true" /><p>No Journal stories match “{search.trim()}”.</p><button className="text-button" onClick={() => setSearch('')}>Clear search</button></div>}
+      {!loading && !error && entries.length > 0 && matchingEntries.length === 0 && !filteringArchive && <div className="journal-notice journal-empty"><Search aria-hidden="true" /><p>{selectedCategory ? `No Journal stories are in “${selectedCategory}”.` : `No Journal stories match “${search.trim()}”.`}</p><button className="text-button" onClick={() => selectedCategory ? setCategory('') : setSearch('')}>{selectedCategory ? 'Clear category' : 'Clear search'}</button></div>}
       {!loading && !error && awaitingRequestedPage && <div className="journal-loading journal-page-loading" role="status"><span aria-hidden="true" />Opening page {requestedPage}…</div>}
-      {!loading && !error && searchingArchive && visibleEntries.length === 0 && <div className="journal-loading journal-page-loading" role="status"><span aria-hidden="true" />Searching older stories…</div>}
+      {!loading && !error && filteringArchive && visibleEntries.length === 0 && <div className="journal-loading journal-page-loading" role="status"><span aria-hidden="true" />Searching older stories…</div>}
       {!loading && !error && !awaitingRequestedPage && visibleEntries.map((entry, index) => <Reveal key={entry.id} delay={(index % 10) * 70}><JournalArchiveCard entry={entry} index={index} /></Reveal>)}
-      {!loading && !error && !searchingArchive && totalPages > 1 && <nav className="journal-pagination" aria-label="Journal pages">
+      {!loading && !error && !filteringArchive && totalPages > 1 && <nav className="journal-pagination" aria-label="Journal pages">
         <button type="button" className="journal-pagination-direction" aria-label="Previous Journal page" disabled={requestedPage <= 1 || loadingMore} onClick={() => setPage(requestedPage - 1)}><ArrowLeft aria-hidden="true" /> Previous</button>
         <div className="journal-pagination-pages">{paginationItems(requestedPage, totalPages).map((item) => typeof item === 'number'
           ? <button type="button" key={item} aria-label={`Go to Journal page ${item}`} aria-current={item === requestedPage ? 'page' : undefined} disabled={item === requestedPage || loadingMore} onClick={() => setPage(item)}>{item}</button>

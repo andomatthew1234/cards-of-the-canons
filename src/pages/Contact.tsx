@@ -59,7 +59,10 @@ export function Contact({ previewMode = false }: { previewMode?: boolean }) {
         email: useAccountDetails ? accountEmail : String(fields.get('email') ?? '').trim().toLowerCase(),
         ...(organisation ? { organisation } : {}),
         message: String(fields.get('message') ?? '').trim(),
-        consent: fields.get('consent') === 'on',
+        // Sending an enquiry is an affirmative request for a response. Record
+        // that narrow, service-only consent without making people negotiate a
+        // redundant checkbox before they can contact us.
+        consent: true,
       })
       if (result.demo) {
         setSubmission('error')
@@ -101,7 +104,6 @@ export function Contact({ previewMode = false }: { previewMode?: boolean }) {
           {!user && <div className="contact-signin-prompt"><LogIn aria-hidden="true" /><div><strong>Sign in for a faster enquiry</strong><p>Sign in or register to autofill your name and email address.</p></div><Link className="button secondary" to="/account">Sign in</Link></div>}
           {useAccountDetails ? <div className="contact-account-details" role="status"><UserCheck aria-hidden="true" /><div><strong>Your account details will be included automatically when you submit this form.</strong><p>We have autofilled your name and email address from your account.</p></div><button type="button" className="button secondary" disabled={submission === 'submitting'} onClick={() => setManualDetails(true)}>Enter different details</button></div> : <><div className="contact-details-heading">{hasAccountDetails && <button type="button" className="text-button" disabled={submission === 'submitting'} onClick={() => { setManualDetails(false); setAccountDetailsOverride(true) }}>Use my account details instead</button>}</div><div className="two-col" key={`${user?.uid ?? 'guest'}-${autofillEnabled}`}><label>Full name<input name="name" required minLength={2} maxLength={80} autoComplete="name" defaultValue={autofillEnabled === false ? '' : accountName} disabled={submission === 'submitting'} /></label><label>Email address<input name="email" type="email" required maxLength={160} autoComplete="email" defaultValue={autofillEnabled === false ? '' : accountEmail} disabled={submission === 'submitting'} /></label></div><label>Organisation <span>(optional)</span><input name="organisation" maxLength={120} autoComplete="organization" disabled={submission === 'submitting'} /></label></>}
           <label className="contact-message-field"><span>How can we help?</span><small>Share your question, idea, quote requirements or feedback with the team.</small><textarea name="message" required minLength={10} maxLength={3000} rows={7} placeholder="I’d like to ask about…" disabled={submission === 'submitting'} /></label>
-          <label className="check"><input name="consent" type="checkbox" required disabled={submission === 'submitting'} /> I agree to my details being stored and used to respond to this enquiry.</label>
           {message && <p className={`form-message${submission === 'success' ? ' success' : ' error'}`} role={submission === 'error' ? 'alert' : 'status'}>{message}</p>}
           <button className="button primary contact-submit" disabled={submission === 'submitting'}>{submission === 'submitting' ? 'Sending…' : 'Send enquiry'} <ArrowUpRight aria-hidden="true" /></button>
         </div>

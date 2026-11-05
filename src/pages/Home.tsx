@@ -110,7 +110,7 @@ function HomeHeroVideo({ onReadyChange }: { onReadyChange: (ready: boolean) => v
     muted
     loop
     playsInline
-    preload="metadata"
+    preload="auto"
     poster={heroPoster}
     aria-hidden="true"
     tabIndex={-1}
@@ -141,6 +141,14 @@ export function missionTitleLines(value: string) {
     return ["The Church's Light,", 'Is Meant To Be Shared']
   }
   return normalised.split(/\n|\|/).map((line) => line.trim()).filter(Boolean)
+}
+
+/** Keeps the editor's full Psalm text while avoiding six narrow stacked lines. */
+export function twoEditorialVerseLines(value: string) {
+  const lines = value.replace(/\r\n/g, '\n').split('\n').map((line) => line.trim()).filter(Boolean)
+  if (lines.length <= 2) return lines
+  const midpoint = Math.ceil(lines.length / 2)
+  return [lines.slice(0, midpoint).join(' '), lines.slice(midpoint).join(' ')]
 }
 
 export function ParallaxFigure({
@@ -284,7 +292,7 @@ function MissionBackground() {
       document.removeEventListener('visibilitychange', play)
     }
   }, [play])
-  return <video className="home-mission-background" ref={videoRef} autoPlay muted loop playsInline preload="metadata" poster="/images/mission-candles-poster.webp" tabIndex={-1} aria-hidden="true" onLoadedData={play} onCanPlay={play}>
+  return <video className="home-mission-background" ref={videoRef} autoPlay muted loop playsInline preload="auto" poster="/images/mission-candles-poster.webp" tabIndex={-1} aria-hidden="true" onLoadedData={play} onCanPlay={play}>
     <source media="(max-width: 700px)" src="/videos/doxa-mission-candles-mobile.mp4" type="video/mp4" />
     <source src="/videos/doxa-mission-candles.mp4" type="video/mp4" />
   </video>
@@ -300,19 +308,22 @@ function useFreeScrollCarousel(itemCount: number) {
   const slideRefs = useRef<Array<HTMLElement | null>>([])
   const dragRef = useRef({ pointerId: -1, startX: 0, startScrollLeft: 0, moved: false })
   const suppressClickRef = useRef(false)
+  const loopTimerRef = useRef<number | null>(null)
   const [activeIndex, setActiveIndex] = useState(0)
   const [dragging, setDragging] = useState(false)
+  const hasLoop = itemCount > 1
+  const centralStart = hasLoop ? itemCount : 0
 
   const registerSlide = useCallback((index: number, node: HTMLElement | null) => {
     slideRefs.current[index] = node
   }, [])
 
-  const nearestIndex = useCallback(() => {
+  const nearestPhysicalIndex = useCallback(() => {
     const viewport = viewportRef.current
     if (!viewport || itemCount <= 0) return 0
-    let nearest = 0
+    let nearest = centralStart
     let nearestDistance = Number.POSITIVE_INFINITY
-    slideRefs.current.slice(0, itemCount).forEach((slide, index) => {
+    slideRefs.current.forEach((slide, index) => {
       if (!slide) return
       const distance = Math.abs(slide.offsetLeft - viewport.scrollLeft)
       if (distance < nearestDistance) {
@@ -321,17 +332,44 @@ function useFreeScrollCarousel(itemCount: number) {
       }
     })
     return nearest
-  }, [itemCount])
+  }, [centralStart, itemCount])
+
+  const logicalIndex = useCallback((physicalIndex: number) => itemCount > 0 ? physicalIndex % itemCount : 0, [itemCount])
+
+  const normaliseLoop = useCallback(() => {
+    const viewport = viewportRef.current
+    if (!viewport || !hasLoop) return
+    const physical = nearestPhysicalIndex()
+    const centralFirst = slideRefs.current[centralStart]
+    const beforeFirst = slideRefs.current[0]
+    if (!centralFirst || !beforeFirst) return
+    const cycleWidth = centralFirst.offsetLeft - beforeFirst.offsetLeft
+    if (physical < centralStart) viewport.scrollLeft += cycleWidth
+    else if (physical >= centralStart + itemCount) viewport.scrollLeft -= cycleWidth
+  }, [centralStart, hasLoop, itemCount, nearestPhysicalIndex])
+
+  const queueLoopNormalisation = useCallback(() => {
+    if (!hasLoop || dragRef.current.pointerId !== -1) return
+    if (loopTimerRef.current !== null) window.clearTimeout(loopTimerRef.current)
+    loopTimerRef.current = window.setTimeout(() => {
+      normaliseLoop()
+      loopTimerRef.current = null
+    }, 180)
+  }, [hasLoop, normaliseLoop])
 
   const onScroll = useCallback(() => {
-    setActiveIndex(nearestIndex())
-  }, [nearestIndex])
+    setActiveIndex(logicalIndex(nearestPhysicalIndex()))
+    queueLoopNormalisation()
+  }, [logicalIndex, nearestPhysicalIndex, queueLoopNormalisation])
 
   const scrollToIndex = useCallback((index: number) => {
     if (itemCount <= 0) return
     const next = wrapIndex(index, itemCount)
     const viewport = viewportRef.current
-    const slide = slideRefs.current[next]
+    // Move into the adjacent duplicate at a boundary, then silently return to
+    // the visually identical centre track once the native scroll settles.
+    const physical = centralStart + activeIndex + (index - activeIndex)
+    const slide = slideRefs.current[physical]
     if (!viewport || !slide) return
     const options: ScrollToOptions = {
       left: slide.offsetLeft,
@@ -340,7 +378,8 @@ function useFreeScrollCarousel(itemCount: number) {
     if (typeof viewport.scrollTo === 'function') viewport.scrollTo(options)
     else viewport.scrollLeft = options.left ?? 0
     setActiveIndex(next)
-  }, [itemCount])
+    queueLoopNormalisation()
+  }, [activeIndex, centralStart, itemCount, queueLoopNormalisation])
 
   const move = useCallback((direction: CarouselDirection) => {
     if (itemCount <= 1) return
@@ -375,16 +414,17 @@ function useFreeScrollCarousel(itemCount: number) {
     setDragging(true)
     event.preventDefault()
     event.currentTarget.scrollLeft = drag.startScrollLeft - distance
-    setActiveIndex(nearestIndex())
-  }, [nearestIndex])
+    setActiveIndex(logicalIndex(nearestPhysicalIndex()))
+  }, [logicalIndex, nearestPhysicalIndex])
 
   const finishDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (dragRef.current.pointerId !== event.pointerId) return
     event.currentTarget.releasePointerCapture?.(event.pointerId)
     dragRef.current.pointerId = -1
     setDragging(false)
-    setActiveIndex(nearestIndex())
-  }, [nearestIndex])
+    setActiveIndex(logicalIndex(nearestPhysicalIndex()))
+    normaliseLoop()
+  }, [logicalIndex, nearestPhysicalIndex, normaliseLoop])
 
   const onClickCapture = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (!suppressClickRef.current) return
@@ -394,19 +434,29 @@ function useFreeScrollCarousel(itemCount: number) {
   }, [])
 
   useEffect(() => {
-    slideRefs.current.length = itemCount
+    slideRefs.current.length = hasLoop ? itemCount * 3 : itemCount
     setActiveIndex((current) => itemCount > 0 ? wrapIndex(current, itemCount) : 0)
-  }, [itemCount])
+    const frame = window.requestAnimationFrame(() => {
+      const viewport = viewportRef.current
+      const middle = slideRefs.current[centralStart]
+      if (viewport && middle) viewport.scrollLeft = middle.offsetLeft
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [centralStart, hasLoop, itemCount])
 
   useEffect(() => {
     const alignCurrentSlide = () => {
       const viewport = viewportRef.current
-      const slide = slideRefs.current[activeIndex]
+      const slide = slideRefs.current[centralStart + activeIndex]
       if (viewport && slide) viewport.scrollLeft = slide.offsetLeft
     }
     window.addEventListener('resize', alignCurrentSlide, { passive: true })
     return () => window.removeEventListener('resize', alignCurrentSlide)
-  }, [activeIndex])
+  }, [activeIndex, centralStart])
+
+  useEffect(() => () => {
+    if (loopTimerRef.current !== null) window.clearTimeout(loopTimerRef.current)
+  }, [])
 
   return {
     activeIndex,
@@ -434,6 +484,9 @@ export function InformationGrid({ items }: { items: StoryPoint[] }) {
   }, [])
   const carousel = useFreeScrollCarousel(items.length)
   const at = (offset: number) => items[wrapIndex(carousel.activeIndex + offset, items.length)]
+  const loopedItems = (items.length > 1 ? [-1, 0, 1] : [0]).flatMap((cycle) =>
+    items.map((item, index) => ({ item, index, clone: cycle !== 0 })),
+  )
 
   return <section className="home-information home-stage home-texture home-texture-terra" aria-label="Why Doxa">
     <div className="home-information-carousel" role="region" aria-roledescription="carousel" aria-label="Why Doxa information" tabIndex={0} onKeyDown={carousel.onKeyDown}>
@@ -452,13 +505,14 @@ export function InformationGrid({ items }: { items: StoryPoint[] }) {
           className="home-information-track"
           data-visible-count={visibleCount}
         >
-          {items.map((item, index) => {
+          {loopedItems.map(({ item, index, clone }, physicalIndex) => {
             const Icon = item.icon
             const itemNumber = index + 1
             return <article
-              className={`home-information-card${item.imageUrl ? ' has-background' : ''}`}
-              key={item.id ?? index}
-              ref={(node) => carousel.registerSlide(index, node)}
+              className={`home-information-card${item.imageUrl ? ' has-background' : ''}${clone ? ' home-carousel-clone' : ''}`}
+              key={`${clone ? 'clone' : 'item'}-${physicalIndex}-${item.id ?? index}`}
+              ref={(node) => carousel.registerSlide(physicalIndex, node)}
+              aria-hidden={clone || undefined}
               style={item.imageUrl ? { backgroundImage: `linear-gradient(145deg, rgba(252, 245, 222, .94), rgba(232, 216, 183, .88)), url(${item.imageUrl})` } : undefined}
             >
               <span className="home-information-number" aria-hidden="true">0{itemNumber}</span>
@@ -498,6 +552,9 @@ export function HomeProductCarousel({ products }: { products: Product[] }) {
   }, [products])
   const carousel = useFreeScrollCarousel(products.length)
   const canRotate = products.length > Math.min(visibleCount, products.length)
+  const loopedProducts = (products.length > 1 ? [-1, 0, 1] : [0]).flatMap((cycle) =>
+    products.map((product, index) => ({ product, index, clone: cycle !== 0 })),
+  )
 
   return <div className="home-product-carousel" role="region" aria-roledescription="carousel" aria-label="Explore the collection" tabIndex={0} onKeyDown={carousel.onKeyDown}>
     <div
@@ -514,13 +571,12 @@ export function HomeProductCarousel({ products }: { products: Product[] }) {
         className="home-product-track"
         data-visible-count={visibleCount}
       >
-        {products.map((product, index) => <div className="home-product-slide" key={product.id} ref={(node) => carousel.registerSlide(index, node)}><ProductCard product={product} variant="compact" /></div>)}
+        {loopedProducts.map(({ product, index, clone }, physicalIndex) => <div className={`home-product-slide${clone ? ' home-carousel-clone' : ''}`} key={`${clone ? 'clone' : 'item'}-${physicalIndex}-${product.id}`} ref={(node) => carousel.registerSlide(physicalIndex, node)} aria-hidden={clone || undefined} inert={clone || undefined}><ProductCard product={product} variant="compact" /></div>)}
       </div>
     </div>
     {canRotate && <>
       <button className="home-product-arrow previous" type="button" aria-label="Previous product" onClick={() => carousel.move(-1)}><ArrowLeft aria-hidden="true" /></button>
       <button className="home-product-arrow next" type="button" aria-label="Next product" onClick={() => carousel.move(1)}><ArrowRight aria-hidden="true" /></button>
-      <span className="home-product-page" aria-hidden="true">{carousel.activeIndex + 1} / {products.length}</span>
       <span className="sr-only" role="status" aria-live="polite">Product {carousel.activeIndex + 1} of {products.length}</span>
     </>}
   </div>
@@ -536,7 +592,7 @@ export function Home({ previewMode = false }: { previewMode?: boolean }) {
   const visibleSocialLinks = (socialMedia?.links ?? []).filter((link) => link.visible && link.url)
   // Production catalogue data is authoritative. Demo products stay confined
   // to CatalogContext's explicit local demo mode and are never merged here.
-  const featuredProducts = orderHomeProducts(products)
+  const featuredProducts = orderHomeProducts(products, sections.featured.productSlugs)
   const legacyInformation: StoryPoint[] = [
     { id: 'rich-context', icon: BookOpen, title: sections.values.firstTitle, body: sections.values.firstBody },
     { id: 'collectible-format', icon: Sparkles, title: sections.values.secondTitle, body: sections.values.secondBody },
@@ -581,7 +637,6 @@ export function Home({ previewMode = false }: { previewMode?: boolean }) {
       </section>
       <section id="home-introduction" className="home-introduction home-stage home-texture home-texture-cherry" data-editor-target={previewMode ? 'home-hero-heading' : undefined}>
         <Reveal className="home-introduction-copy">
-          <p className="eyebrow">History held in your hand</p>
           <h2>{introductionTitle}</h2>
           <HomeIntroductionBody value={introductionBody} />
           <div className="button-row"><Link className="button primary" data-editor-target={previewMode ? 'home-hero-primary' : undefined} to="/shop">{sections.hero.primaryActionLabel} <ArrowRight aria-hidden="true" /></Link><Link className="button secondary" data-editor-target={previewMode ? 'home-hero-secondary' : undefined} to="/about">About us</Link></div>
@@ -645,7 +700,7 @@ export function Home({ previewMode = false }: { previewMode?: boolean }) {
           <Link className="button home-genesis-story-button" to="/about">Our Story <ArrowRight aria-hidden="true" /></Link>
           {(editorial.genesis.quoteReference || editorial.genesis.quote) && <blockquote className="home-genesis-verse">
             {editorial.genesis.quoteReference && <strong>{editorial.genesis.quoteReference}</strong>}
-            {editorial.genesis.quote && <SafeRichText value={editorial.genesis.quote} className="home-genesis-verse-lines" />}
+            {editorial.genesis.quote && <div className="home-genesis-verse-lines">{twoEditorialVerseLines(editorial.genesis.quote).map((line, index) => <SafeRichText key={`${index}-${line}`} value={line} />)}</div>}
           </blockquote>}
         </Reveal>
       </section>

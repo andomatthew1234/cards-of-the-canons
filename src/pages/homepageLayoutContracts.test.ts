@@ -57,12 +57,12 @@ describe('homepage layout contracts', () => {
     expect(genesisRule).toContain('min-height: 600px')
   })
 
-  it('lets the How It Began Scripture panel span the editorial panel with room for multiple lines', () => {
+  it('keeps the How It Began Scripture panel compact while spanning the editorial panel', () => {
     const verseRule = css.match(/\.home-genesis-verse\s*\{([^}]*)\}/)?.[1] ?? ''
 
     expect(verseRule).toContain('align-self: stretch')
     expect(verseRule).toContain('max-width: none')
-    expect(verseRule).toContain('min-height: clamp(7rem, 10vw, 8.75rem)')
+    expect(verseRule).toContain('min-height: clamp(5.75rem, 8vw, 7rem)')
     expect(verseRule).toContain('width: calc(100% + (2 * clamp(2.25rem, 4vw, 4rem)))')
   })
 
@@ -129,6 +129,14 @@ describe('homepage layout contracts', () => {
     expect(css).not.toContain('filter: blur(3px)')
   })
 
+  it('uses visually identical edge clones to wrap both carousels without a reset flash', () => {
+    expect(homeSource).toContain("items.length > 1 ? [-1, 0, 1] : [0]")
+    expect(homeSource).toContain("products.length > 1 ? [-1, 0, 1] : [0]")
+    expect(homeSource).toContain('normaliseLoop')
+    expect(homeSource).toContain('home-carousel-clone')
+    expect(css).toContain('.home-carousel-clone { pointer-events: none; }')
+  })
+
   it('keeps information tracks fluid inside tablet viewports', () => {
     const tabletRules = css.match(/@media \(max-width: 979px\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
     expect(css).toContain('grid-auto-columns: calc((100% - (2 * var(--home-carousel-gap))) / 3)')
@@ -166,6 +174,16 @@ describe('homepage layout contracts', () => {
     expect(homeSource).toContain('/videos/doxa-mission-candles-mobile.mp4')
     expect(homeSource).toContain('/videos/doxa-mission-candles.mp4')
     expect(homeSource).not.toContain('/videos/doxa-candle-vigil.mp4')
+  })
+
+  it('keeps the homepage poster visible until a fully preloaded mobile-safe video can play', () => {
+    expect(homeSource).toContain('preload="auto"')
+    expect(homeSource).not.toContain('preload="metadata"')
+  })
+
+  it('removes retired homepage chrome that competes with the collection', () => {
+    expect(homeSource).not.toContain('History held in your hand')
+    expect(homeSource).not.toContain('home-product-page')
   })
 
   it('lengthens the Journal image currently crossing the viewport focus line', () => {
@@ -209,6 +227,23 @@ describe('homepage layout contracts', () => {
     expect(bodyRule).toContain('rgba(252, 245, 222, .94)')
     expect(verseRule).toContain('clamp(.92rem, 1.05vw, 1.08rem)')
     expect(verseRule).toContain('rgba(252, 245, 222, .76)')
+  })
+
+  it('preserves breathing room around the Mission verse on short screens without a nested scroll area', () => {
+    const shortViewportRules = css.match(/@media \(max-height: 740px\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
+
+    expect(shortViewportRules).toContain('margin-top: 1rem')
+    expect(shortViewportRules).toContain('padding-top: .9rem')
+    expect(shortViewportRules).toContain('line-height: 1.55')
+    expect(shortViewportRules).not.toContain('overflow-y: auto')
+  })
+
+  it('lets the website editor select and order the products shown in the homepage collection', () => {
+    const editorSource = readFileSync(resolve(process.cwd(), 'src/pages/admin/WebsiteEditorPage.tsx'), 'utf8')
+
+    expect(homeSource).toContain('orderHomeProducts(products, sections.featured.productSlugs)')
+    expect(editorSource).toContain('Homepage products')
+    expect(editorSource).toContain('draft.pages.home.sections.featured.productSlugs')
   })
 
   it('lays the display-card prompt beneath the card instead of overlaying it', () => {

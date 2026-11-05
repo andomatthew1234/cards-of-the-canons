@@ -52,6 +52,7 @@ import {
   useState,
 } from "react";
 import { RichTextField } from "../../admin/components";
+import { useAdminData } from "../../admin/AdminContext";
 import { useUnsavedChanges } from "../../admin/utils";
 import {
   cloneWebsiteContent,
@@ -68,6 +69,7 @@ import { PageMeta } from "../../components/PageMeta";
 import { SafeRichText } from "../../components/SafeRichText";
 import { SiteBrand } from "../../components/Layout";
 import { siteThemeCssVariables } from "../../lib/siteTheme";
+import { HOME_PRODUCT_SLUGS } from "../../lib/homeProducts";
 import {
   deleteWebsiteMedia,
   getPublishedWebsiteContent,
@@ -800,6 +802,7 @@ function contrastRatio(foreground: string, background: string) {
 }
 
 export function WebsiteEditorPage() {
+  const { products: adminProducts } = useAdminData();
   const [editorState, setEditorState] = useState<WebsiteEditorState | null>(
     null,
   );
@@ -1405,6 +1408,19 @@ export function WebsiteEditorPage() {
     : undefined;
   const editorialPanels: HomepageEditorialPanels =
     content.pages.home.sections.editorial ?? defaultHomepageEditorialPanels;
+  const publishedHomepageProducts = [...adminProducts]
+    .filter((product) => product.status === "published")
+    .sort((left, right) => left.name.localeCompare(right.name, "en-AU", { sensitivity: "base" }));
+  const featuredProductSlugs = content.pages.home.sections.featured.productSlugs
+    ? [...content.pages.home.sections.featured.productSlugs]
+    : [...HOME_PRODUCT_SLUGS];
+  const selectedHomepageProducts = featuredProductSlugs.flatMap((slug) => {
+    const product = publishedHomepageProducts.find((item) => item.slug === slug);
+    return product ? [product] : [];
+  });
+  const availableHomepageProducts = publishedHomepageProducts.filter(
+    (product) => !featuredProductSlugs.includes(product.slug),
+  );
   const selectedPage =
     section === "home" || section === "about" || section === "shop" || section === "contact"
       ? section
@@ -2001,6 +2017,53 @@ export function WebsiteEditorPage() {
                 })
               }
             />
+            <div className="website-featured-product-picker">
+              <div className="website-featured-product-picker-heading">
+                <div><strong>Homepage products</strong><small>Choose the published products shown on the homepage and arrange their order.</small></div>
+                <span>{selectedHomepageProducts.length} selected</span>
+              </div>
+              {selectedHomepageProducts.length > 0 ? <ol className="website-featured-product-list">
+                {selectedHomepageProducts.map((product, index) => <li key={product.id}>
+                  <span><strong>{product.name}</strong><small>/{product.slug}</small></span>
+                  <div className="website-featured-product-actions">
+                    <button type="button" className="icon-button" aria-label={`Move ${product.name} earlier`} disabled={index === 0} onClick={() => mutate((draft) => {
+                      const selected = [...(draft.pages.home.sections.featured.productSlugs ?? HOME_PRODUCT_SLUGS)];
+                      const productIndex = selected.indexOf(product.slug);
+                      if (productIndex <= 0) return;
+                      [selected[productIndex - 1], selected[productIndex]] = [selected[productIndex], selected[productIndex - 1]];
+                      draft.pages.home.sections.featured.productSlugs = selected;
+                    })}><ArrowUp aria-hidden="true" /></button>
+                    <button type="button" className="icon-button" aria-label={`Move ${product.name} later`} disabled={index === selectedHomepageProducts.length - 1} onClick={() => mutate((draft) => {
+                      const selected = [...(draft.pages.home.sections.featured.productSlugs ?? HOME_PRODUCT_SLUGS)];
+                      const productIndex = selected.indexOf(product.slug);
+                      if (productIndex < 0 || productIndex >= selected.length - 1) return;
+                      [selected[productIndex], selected[productIndex + 1]] = [selected[productIndex + 1], selected[productIndex]];
+                      draft.pages.home.sections.featured.productSlugs = selected;
+                    })}><ArrowDown aria-hidden="true" /></button>
+                    <button type="button" className="button secondary website-featured-product-remove" onClick={() => mutate((draft) => {
+                      const selected = draft.pages.home.sections.featured.productSlugs ?? HOME_PRODUCT_SLUGS;
+                      draft.pages.home.sections.featured.productSlugs = selected.filter((slug) => slug !== product.slug);
+                    })}>Remove</button>
+                  </div>
+                </li>)}
+              </ol> : <p className="website-featured-product-empty">No products are selected for the homepage.</p>}
+              {availableHomepageProducts.length > 0 && <label className="website-featured-product-add">
+                <span>Add a published product</span>
+                <select defaultValue="" onChange={(event) => {
+                  const slug = event.target.value;
+                  if (!slug) return;
+                  mutate((draft) => {
+                    const selected = draft.pages.home.sections.featured.productSlugs ?? HOME_PRODUCT_SLUGS;
+                    draft.pages.home.sections.featured.productSlugs = [...selected, slug];
+                  });
+                  event.currentTarget.value = "";
+                }}>
+                  <option value="">Select a product…</option>
+                  {availableHomepageProducts.map((product) => <option key={product.id} value={product.slug}>{product.name}</option>)}
+                </select>
+              </label>}
+              {publishedHomepageProducts.length === 0 && <p className="website-featured-product-empty">Published products will appear here once the product catalogue finishes loading.</p>}
+            </div>
           </EditorGroup>
           <EditorGroup controlId="story" title="Editorial story">
             <TextField
