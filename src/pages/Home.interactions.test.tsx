@@ -71,6 +71,16 @@ describe('homepage card interaction', () => {
     expect(card).toHaveAttribute('aria-busy', 'false')
     expect(card).toHaveAccessibleName('Show the front of the Doxa card')
 
+    const plane = container.querySelector('.home-history-flip-inner') as HTMLElement
+    expect(plane).toHaveClass('is-closing')
+    expect(container.querySelector('.home-history-front')).not.toHaveAttribute('hidden')
+    expect(container.querySelector('.home-history-back')).toHaveAttribute('hidden')
+    fireEvent.animationEnd(plane)
+    expect(plane).toHaveClass('is-opening')
+    expect(container.querySelector('.home-history-front')).toHaveAttribute('hidden')
+    expect(container.querySelector('.home-history-back')).not.toHaveAttribute('hidden')
+    fireEvent.animationEnd(plane)
+
     await user.click(card)
     expect(card).toHaveAttribute('aria-pressed', 'false')
   })
@@ -89,6 +99,47 @@ describe('homepage card interaction', () => {
     await user.click(card)
 
     expect(card).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('keeps only one face visible and finishes a turn before accepting another press', () => {
+    const { container } = render(<ParallaxFigure src="/images/front.webp" />)
+    const card = screen.getByRole('button')
+    const plane = container.querySelector('.home-history-flip-inner') as HTMLElement
+    const front = container.querySelector('.home-history-front')
+    const back = container.querySelector('.home-history-back')
+
+    fireEvent.click(card)
+    fireEvent.click(card)
+    expect(card).toHaveAttribute('aria-pressed', 'true')
+    expect(front).not.toHaveAttribute('hidden')
+    expect(back).toHaveAttribute('hidden')
+    fireEvent.animationEnd(plane)
+    expect(front).toHaveAttribute('hidden')
+    expect(back).not.toHaveAttribute('hidden')
+    fireEvent.animationEnd(plane)
+    fireEvent.click(card)
+    fireEvent.animationEnd(plane)
+    expect(front).not.toHaveAttribute('hidden')
+    expect(back).toHaveAttribute('hidden')
+  })
+
+  it('switches directly to the decoded face with reduced motion', async () => {
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true }) as unknown as typeof window.matchMedia
+    const { container } = render(<ParallaxFigure src="/images/front.webp" />)
+    fireEvent.click(screen.getByRole('button'))
+    expect(container.querySelector('.home-history-front')).toHaveAttribute('hidden')
+    expect(container.querySelector('.home-history-back')).not.toHaveAttribute('hidden')
+    expect(container.querySelector('.home-history-flip-inner')).not.toHaveClass('is-closing')
+  })
+
+  it('uses the branded rear instead of trapping a queued turn when the rear image fails', async () => {
+    const { container } = render(<ParallaxFigure src="/images/front.webp" backSrc="/images/missing.webp" />)
+    const card = screen.getByRole('button')
+    fireEvent.click(card)
+    fireEvent.error(container.querySelector('.home-history-back-image') as HTMLImageElement)
+    await waitFor(() => expect(card).toHaveAttribute('aria-pressed', 'true'))
+    expect(card).toHaveAttribute('aria-busy', 'false')
+    expect(container.querySelector('.home-history-back')).not.toHaveClass('has-custom-image')
   })
 
   it('keeps the branded rear face for website content saved before rear images existed', () => {

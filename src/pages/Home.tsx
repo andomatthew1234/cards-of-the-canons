@@ -166,9 +166,44 @@ export function ParallaxFigure({
   const backImageRef = useRef<HTMLImageElement>(null)
   const backLoadVersion = useRef(0)
   const pointerFrame = useRef(0)
+  const turnLocked = useRef(false)
   const [flipped, setFlipped] = useState(false)
+  const [visibleBack, setVisibleBack] = useState(false)
+  const [turnPhase, setTurnPhase] = useState<'idle' | 'closing' | 'opening'>('idle')
   const [backReady, setBackReady] = useState(!backSrc)
+  const [backFailed, setBackFailed] = useState(false)
   const [flipQueued, setFlipQueued] = useState(false)
+
+  const beginTurn = useCallback((next: boolean) => {
+    if (turnLocked.current) return
+    setFlipped(next)
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setVisibleBack(next)
+      return
+    }
+    turnLocked.current = true
+    setTurnPhase('closing')
+  }, [])
+
+  const advanceTurn = useCallback(() => {
+    if (turnPhase === 'closing') {
+      // Swap artwork only at the edge-on midpoint. Neither visible face is
+      // ever rotated beyond 90 degrees, including on mobile compositors.
+      setVisibleBack(flipped)
+      setTurnPhase('opening')
+    } else if (turnPhase === 'opening') {
+      turnLocked.current = false
+      setTurnPhase('idle')
+    }
+  }, [flipped, turnPhase])
+
+  useEffect(() => {
+    if (turnPhase === 'idle') return
+    // Also settle if the browser suppresses animation events (background tabs
+    // or an accessibility preference change during the turn).
+    const timer = window.setTimeout(advanceTurn, 500)
+    return () => window.clearTimeout(timer)
+  }, [advanceTurn, turnPhase])
 
   const prepareBackImage = useCallback(async (image: HTMLImageElement, version: number) => {
     try {
@@ -183,8 +218,12 @@ export function ParallaxFigure({
   useEffect(() => {
     const version = backLoadVersion.current + 1
     backLoadVersion.current = version
+    turnLocked.current = false
     setFlipped(false)
+    setVisibleBack(false)
+    setTurnPhase('idle')
     setFlipQueued(false)
+    setBackFailed(false)
     setBackReady(!backSrc)
     const image = backImageRef.current
     if (backSrc && image?.complete && image.naturalWidth > 0) void prepareBackImage(image, version)
@@ -192,9 +231,11 @@ export function ParallaxFigure({
 
   useEffect(() => {
     if (!backReady || !flipQueued) return
-    setFlipped(true)
+    beginTurn(true)
     setFlipQueued(false)
-  }, [backReady, flipQueued])
+  }, [backReady, beginTurn, flipQueued])
+
+  useEffect(() => () => window.cancelAnimationFrame(pointerFrame.current), [])
 
   useEffect(() => {
     const frame = frameRef.current
@@ -243,22 +284,23 @@ export function ParallaxFigure({
   }
 
   const toggleFlip = () => {
+    if (turnLocked.current) return
     if (backSrc && !backReady && !flipped) {
       setFlipQueued(true)
       return
     }
     setFlipQueued(false)
-    setFlipped((current) => !current)
+    beginTurn(!flipped)
   }
 
   return <figure ref={frameRef} onPointerMove={move} onPointerLeave={reset} aria-label="Interactive Doxa card artwork">
     <div className="home-history-image">
       <button className={`home-history-flip${flipped ? ' is-flipped' : ''}${flipQueued ? ' is-preparing' : ''}`} type="button" aria-pressed={flipped} aria-busy={backSrc ? !backReady : false} aria-label={flipped ? 'Show the front of the Doxa card' : 'Show the back of the Doxa card'} onClick={toggleFlip}>
-        <span className="home-history-flip-inner">
-          <span className="home-history-face home-history-front" aria-hidden={flipped || undefined}><img src={src} alt={alt} loading="lazy" decoding="async" /></span>
-          <span className={`home-history-face home-history-back${backSrc ? ' has-custom-image' : ''}`} aria-hidden={!flipped || undefined}>
-            {backSrc
-              ? <img ref={backImageRef} className="home-history-back-image" src={backSrc} alt={backAlt} loading="eager" fetchPriority="high" decoding="async" onLoad={(event) => void prepareBackImage(event.currentTarget, backLoadVersion.current)} />
+        <span className={`home-history-flip-inner${turnPhase !== 'idle' ? ` is-${turnPhase}` : ''}`} onAnimationEnd={(event) => { if (event.target === event.currentTarget) advanceTurn() }}>
+          <span className="home-history-face home-history-front" hidden={visibleBack} aria-hidden={visibleBack || undefined}><img src={src} alt={alt} loading="lazy" decoding="async" /></span>
+          <span className={`home-history-face home-history-back${backSrc && !backFailed ? ' has-custom-image' : ''}`} hidden={!visibleBack} aria-hidden={!visibleBack || undefined}>
+            {backSrc && !backFailed
+              ? <img ref={backImageRef} className="home-history-back-image" src={backSrc} alt={backAlt} loading="eager" fetchPriority="high" decoding="async" onLoad={(event) => void prepareBackImage(event.currentTarget, backLoadVersion.current)} onError={() => { setBackFailed(true); setBackReady(true) }} />
               : <><span className="home-card-back-mark">D</span><strong>Doxa</strong><small>Treasury</small><span className="home-card-back-rule" /></>}
           </span>
         </span>
@@ -670,7 +712,7 @@ export function Home({ previewMode = false }: { previewMode?: boolean }) {
       </div></Reveal>}
       {status === 'loading' ? <CatalogueLoading /> : status === 'error' ? <CatalogueUnavailable retry={reload} /> : featuredProducts.length === 0 ? <CatalogueEmpty /> : <><HomeProductCarousel products={featuredProducts} /><Reveal><div className="centred"><Link className="text-link" to="/shop">{website.copy.homeViewAllLabel} <ArrowRight size={18} /></Link></div></Reveal></>}
     </section>
-    if (section === 'values') return <div data-editor-target={previewMode ? 'home-values' : undefined}><InformationGrid items={information} /></div>
+    if (section === 'values') return <div className="home-information-section" data-editor-target={previewMode ? 'home-values' : undefined}><InformationGrid items={information} /></div>
     return <>
       <section className="home-editorial-chapter home-community-chapter" aria-labelledby="home-community-title" data-editor-target={previewMode ? 'home-council' : undefined}>
         <Reveal className="home-editorial-media home-community-media"><figure>{editorial.council.imageUrl

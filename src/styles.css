@@ -17530,6 +17530,121 @@ body {
 .editorial-footer {
   background: linear-gradient(135deg, #1c0f0b, #3d2015 62%, #24120d);
 }
+/* Keep the brand and link groups on one shared row. The earlier full-width
+   introduction and one-column mobile rules separated the brand from the links. */
+.site-shell .editorial-footer {
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, .7fr) minmax(0, 1.35fr);
+  align-items: start;
+  column-gap: clamp(1rem, 2.5vw, 2.5rem);
+  text-align: left;
+}
+.site-shell .editorial-footer:has(.footer-social-links) {
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, .9fr) minmax(0, .7fr) minmax(0, 1.35fr);
+}
+.site-shell .editorial-footer .footer-introduction,
+.site-shell .editorial-footer .footer-navigation,
+.site-shell .editorial-footer > .footer-link-group,
+.site-shell .editorial-footer .footer-contact {
+  grid-column: auto;
+  align-items: flex-start;
+  justify-content: flex-start;
+  min-width: 0;
+  text-align: left;
+}
+.site-shell .editorial-footer .footer-brand {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  font-size: clamp(1.2rem, 2vw, 1.7rem);
+}
+.site-shell .editorial-footer .site-logo-image {
+  max-width: 100%;
+}
+.site-shell .editorial-footer .footer-link-group h2,
+.site-shell .editorial-footer .footer-contact h2 {
+  margin-top: 0;
+}
+.site-shell .editorial-footer .footer-introduction > p {
+  margin-inline: 0;
+}
+.site-shell .editorial-footer .footer-contact-button {
+  margin-inline: 0;
+}
+.site-shell .editorial-footer .footer-note {
+  grid-column: 1 / -1;
+  margin-bottom: 1.5rem;
+}
+.site-shell .editorial-footer .footer-abn {
+  bottom: 1rem;
+}
+@media (max-width: 900px) {
+  .site-shell .editorial-footer {
+    grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(0, 1fr));
+    gap: 1.5rem 1rem;
+    padding-inline: clamp(1rem, 4vw, 2rem);
+  }
+  .site-shell .editorial-footer:has(.footer-social-links) {
+    grid-template-columns: minmax(0, 1.25fr) repeat(3, minmax(0, 1fr));
+  }
+  .site-shell .editorial-footer .footer-contact {
+    grid-column: 1 / -1;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(216, 203, 193, .2);
+  }
+  .site-shell .editorial-footer .footer-note {
+    margin-block: 0;
+  }
+  .site-shell .editorial-footer .footer-abn {
+    position: static;
+    grid-column: 1 / -1;
+    text-align: right;
+    white-space: normal;
+  }
+}
+@media (max-width: 480px) {
+  .site-shell .editorial-footer {
+    column-gap: .65rem;
+  }
+  .site-shell .editorial-footer:has(.footer-social-links) {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, .7fr);
+  }
+  .site-shell .editorial-footer .footer-brand {
+    gap: .35rem;
+    font-size: 1.1rem;
+  }
+  .site-shell .editorial-footer .brand-mark {
+    width: 26px;
+    height: 32px;
+    font-size: 1rem;
+    flex: 0 0 auto;
+  }
+  .site-shell .editorial-footer .footer-introduction > p,
+  .site-shell .editorial-footer .footer-newsletter-link,
+  .site-shell .editorial-footer .footer-link-group {
+    font-size: .75rem;
+    overflow-wrap: anywhere;
+  }
+  .site-shell .editorial-footer .footer-link-group h2 {
+    font-size: .65rem;
+    letter-spacing: .08em;
+  }
+  .site-shell .editorial-footer .footer-social-link {
+    flex-wrap: nowrap;
+    gap: .25rem;
+    font-size: .7rem;
+  }
+  .site-shell .editorial-footer .footer-social-link svg {
+    width: 12px;
+    height: 12px;
+  }
+  .site-shell .editorial-footer .footer-newsletter-link {
+    display: block;
+    max-width: 100%;
+    overflow-wrap: normal;
+  }
+  .site-shell .editorial-footer .footer-newsletter-link span {
+    display: inline-block;
+  }
+}
 @media (max-width: 900px) {
   .header,
   .home-header {

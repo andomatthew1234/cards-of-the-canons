@@ -187,9 +187,10 @@ describe('homepage layout contracts', () => {
   })
 
   it('overlaps adjacent homepage sections by one pixel so compositing cannot expose white seams', () => {
-    const seamRule = css.match(/\.home-shell\s*>\s*section\s*\+\s*section\s*\{([^}]*)\}/)?.[1] ?? ''
+    const seamRule = css.match(/\.home-shell \.page-transition > :is\(section, \.home-information-section\) \+ :is\(section, \.home-information-section\)\s*\{([^}]*)\}/)?.[1] ?? ''
 
     expect(seamRule).toContain('margin-top: -1px')
+    expect(homeSource).toContain('className="home-information-section"')
   })
 
   it('lengthens the Journal image currently crossing the viewport focus line', () => {
